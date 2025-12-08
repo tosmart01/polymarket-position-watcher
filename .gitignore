@@ -12,3 +12,5 @@ dist/
 .env
 .venv
 .idea
+dist
+poly_position_watcher.egg-info

@@ -18,7 +18,7 @@ PYTHON_REQUIRES = PROJECT.get("requires-python", ">=3.11")
 README_PATH = HERE / PROJECT.get("readme", "README.md")
 
 setup(
-    name=PROJECT.get("name", "position-watcher"),
+    name=PROJECT.get("name", "poly-position-watcher"),
     version=PROJECT.get("version", "0.0.0"),
     description=PROJECT.get("description", ""),
     long_description=README_PATH.read_text(encoding="utf-8") if README_PATH.exists() else "",
@@ -28,8 +28,8 @@ setup(
     python_requires=PYTHON_REQUIRES,
     install_requires=DEPENDENCIES,
     license=PROJECT.get("license", "MIT"),
-    author=PROJECT.get("authors", [{}])[0].get("name", "Donvink"),
-    url=PROJECT.get("urls", {}).get("Homepage", "https://github.com/donvink/position-watcher"),
+    author=PROJECT.get("authors", [{}])[0].get("name", "pinbar"),
+    url=PROJECT.get("urls", {}).get("Homepage", "https://github.com/tosmart01/polymarket-position-watcher"),
     classifiers=[
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",

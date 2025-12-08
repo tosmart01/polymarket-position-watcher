@@ -1,5 +1,5 @@
 [project]
-name = "polymarket-position-watcher"
+name = "poly-position-watcher"
 version = "0.1.0"
 description = "clear about domain + functionality."
 readme = "README.md"
@@ -11,6 +11,8 @@ dependencies = [
 [format]
 line-length = 120
 
+[project.urls]
+"Homepage" = "https://github.com/tosmart01/polymarket-position-watcher"
 
 [tool.ruff.format]
 quote-style = "double"
