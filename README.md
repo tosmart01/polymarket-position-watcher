@@ -1,6 +1,6 @@
 # poly-position-watcher
 
-`poly-position-watcher` 将我们在内部使用的仓位监控逻辑独立成了一个可复用的 Python 包，方便接入者基于 Polymarket 官方 `py-clob-client` SDK 快速搭建自己的仓位看板或做市机器人。该包负责：
+`poly-position-watcher` 简单的仓位 | 订单监控实现：
 
 - 通过 WebSocket 追踪实时 `TRADE` 与 `ORDER` 事件
 - 把 HTTP API 的历史数据和 WebSocket 增量数据统一成同一套 Pydantic 模型
