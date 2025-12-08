@@ -1,0 +1,24 @@
+[project]
+name = "polymarket-position-watcher"
+version = "0.1.0"
+description = "clear about domain + functionality."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "py-clob-client>=0.25.0",
+    "websocket-client>=1.8.0",
+]
+[format]
+line-length = 120
+
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[dependency-groups]
+dev = [
+    "build>=1.3.0",
+    "twine>=6.2.0",
+]
