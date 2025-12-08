@@ -21,7 +21,7 @@ pip install poly-position-watcher
 
 ```python
 from py_clob_client.client import ClobClient
-from poly_position_watcher import PositionWatcherService
+from poly_position_watcher import PositionWatcherService, OrderMessage, UserPosition
 
 client = ClobClient(
     base_url="https://clob.polymarket.com",
@@ -32,37 +32,16 @@ client = ClobClient(
 with PositionWatcherService(client=client) as service:
     # 可选：HTTP 轮询兜底历史仓位
     with service.http_listen(markets=["<condition_id>"], bootstrap_http=True):
-        position = service.blocking_get_position("<token_id>", timeout=5)
-        order = service.get_order("<order_id>")
+        position: UserPosition = service.get_position("<token_id>")
+        position: UserPosition = service.blocking_get_position("<token_id>", timeout=5)
+        order: OrderMessage = service.get_order("<order_id>")
+        order: OrderMessage = service.blocking_get_order("<order_id>", timeout=3)
         print(position)
         print(order)
 ```
 
-### 进阶示例（`examples/http_bootstrap_example.py`）
+### 完整示例（`examples/http_bootstrap_example.py`）
 
-下面是一段更完整的示例脚本（对应 `examples/http_bootstrap_example.py`），演示如何在启动时通过 `http_listen` 获取历史订单 & 仓位，并实时追踪：
-
-```python
-from py_clob_client.client import ClobClient
-from poly_position_watcher import PositionWatcherService, OrderMessage, UserPosition
-
-client = ClobClient(...)
-TARGET_MARKETS = ["0x3b7e9926575eb7fae204d27ee9d3c9db0f34d357e4b8c..."]
-TARGET_ORDERS = ["0x74a71abb9efe59c994e0987fa81963aae23d7165f036afb..."]
-token_id = ""
-
-with PositionWatcherService(client=client) as service:
-    # 如果已经存在历史仓位，需要提前告诉 http_listen 所有关心的 markets / orders 并开启 bootstrap_http
-    with service.http_listen(markets=TARGET_MARKETS, orders=TARGET_ORDERS, bootstrap_http=True):
-        order: OrderMessage = service.blocking_get_order(TARGET_ORDERS[0], timeout=5)
-        position: UserPosition = service.blocking_get_position(
-            token_id=token_id,
-            timeout=5,
-        )
-        print(order)
-        print(position)
-
-```
 
 示例输出：
 
