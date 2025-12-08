@@ -44,7 +44,7 @@ with PositionWatcherService(client=client) as service:
 
 ```python
 from py_clob_client.client import ClobClient
-from poly_position_watcher import PositionWatcherService
+from poly_position_watcher import PositionWatcherService, OrderMessage, UserPosition
 
 client = ClobClient(...)
 TARGET_MARKETS = ["0x3b7e9926575eb7fae204d27ee9d3c9db0f34d357e4b8c..."]
@@ -54,8 +54,8 @@ token_id = ""
 with PositionWatcherService(client=client) as service:
     # 如果已经存在历史仓位，需要提前告诉 http_listen 所有关心的 markets / orders 并开启 bootstrap_http
     with service.http_listen(markets=TARGET_MARKETS, orders=TARGET_ORDERS, bootstrap_http=True):
-        order = service.blocking_get_order(TARGET_ORDERS[0], timeout=5)
-        position = service.blocking_get_position(
+        order: OrderMessage = service.blocking_get_order(TARGET_ORDERS[0], timeout=5)
+        position: UserPosition = service.blocking_get_position(
             token_id=token_id,
             timeout=5,
         )
