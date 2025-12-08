@@ -12,6 +12,7 @@
 
 ```bash
 pip install poly-position-watcher
+# pip install poly-position-watcher --index-url https://pypi.org/simple
 ```
 
 如果你是从源码安装，先克隆本仓库然后执行 `pip install -e .`。
