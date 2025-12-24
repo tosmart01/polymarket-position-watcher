@@ -39,10 +39,10 @@ class PositionStore:
         self.queue_dict: Dict[str, Queue] = {}
 
     def get_token_id_from_trade(self, trade: TradeMessage) -> tuple[str, str] | None:
-        if trade.maker_address == self.user_address:
+        if trade.maker_address.upper() == self.user_address.upper():
             return trade.outcome, trade.asset_id
         for order in trade.maker_orders:
-            if order.maker_address == self.user_address:
+            if order.maker_address.upper() == self.user_address.upper():
                 return order.outcome, order.asset_id
 
     def _put(self, _id: str, item: UserPosition | OrderMessage) -> None:
@@ -320,10 +320,8 @@ class PositionWatcherService:
         try:
             return self.position_store.blocking_get_token_position(token_id, timeout)
         except Empty:
-            # 若超时未收到任何仓位更新，则返回 size=0 的占位对象，方便上层统一处理
-            return UserPosition(
-                token_id=token_id, price=0, size=0, volume=0, last_update=0
-            )
+            # 若超时未收到任何仓位更新，则返回上一次position 方便上层统一处理
+            return self.get_position(token_id)
 
     def blocking_get_order(
             self, order_id: str, timeout: float = None

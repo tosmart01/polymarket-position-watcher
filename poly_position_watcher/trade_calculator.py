@@ -37,7 +37,7 @@ def calculate_position_from_trades(
 
         # maker 部分
         for order in trade.maker_orders:
-            if order.maker_address != user_address:
+            if order.maker_address.upper() != user_address.upper():
                 continue
             is_maker_order = True
 
@@ -47,7 +47,7 @@ def calculate_position_from_trades(
                 sell_events.append((-order.size, order.price, trade.match_time))
 
         # taker 部分
-        if not is_maker_order and trade.maker_address == user_address:
+        if not is_maker_order and trade.maker_address.upper() == user_address.upper():
             if trade.side == Side.BUY:
                 buy_events.append((trade.size, trade.price, trade.match_time))
             else:

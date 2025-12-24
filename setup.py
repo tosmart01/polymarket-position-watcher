@@ -19,7 +19,7 @@ README_PATH = HERE / PROJECT.get("readme", "README.md")
 
 setup(
     name=PROJECT.get("name", "poly-position-watcher"),
-    version=PROJECT.get("version", "0.0.0"),
+    version=PROJECT.get("version", "0.1.1"),
     description=PROJECT.get("description", ""),
     long_description=README_PATH.read_text(encoding="utf-8") if README_PATH.exists() else "",
     long_description_content_type="text/markdown",
