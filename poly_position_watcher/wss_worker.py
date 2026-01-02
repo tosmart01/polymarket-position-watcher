@@ -175,7 +175,7 @@ class PolymarketUserWS:
             sub_msg["markets"] = []
 
         ws.send(json.dumps(sub_msg))
-        logger.info("[WS] Sent subscribe: \n{}", json_dumps(sub_msg))
+        logger.info("[WS] Sent subscribe success")
 
     def _on_message(self, ws: WebSocket, message: str):
         # 收到任何消息都视为有“活跃”
@@ -201,7 +201,6 @@ class PolymarketUserWS:
 
     def _on_error(self, ws: WebSocket, error):
         logger.error("[WS] Error: {}", error)
-        # 出现错误时关闭连接，交给外层循环重连
         try:
             ws.close()
         except Exception:

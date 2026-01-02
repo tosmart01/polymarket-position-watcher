@@ -125,6 +125,7 @@ class UserPosition(PrettyPrintBaseModel):
     market_id: Optional[str] = None
     outcome: Optional[str] = None
     created_at: datetime | None = None
+    is_failed: bool = False
 
 
 class PositionDetails(BaseModel):

@@ -1,10 +1,11 @@
 [project]
 name = "poly-position-watcher"
-version = "0.1.1"
-description = "clear about domain + functionality."
+version = "0.1.2"
+description = "polymarket proxy wallet redeem"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "loguru>=0.7.3",
     "py-clob-client>=0.25.0",
     "websocket-client>=1.8.0",
 ]

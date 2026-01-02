@@ -127,6 +127,7 @@ class PositionStore:
     def build_position(
             self, trades: list[TradeMessage], token_id, outcome: str
     ) -> UserPosition | None:
+        is_failed = any(trade.status == "FAILED" for trade in trades)
         position_result = calculate_position_from_trades(
             trades, user_address=self.user_address
         )
@@ -139,6 +140,7 @@ class PositionStore:
             market_id=trades[0].market,
             outcome=outcome,
             created_at=datetime.fromtimestamp(position_result.last_update),
+            is_failed=is_failed,
         )
         return current
         # if exists_pos := self.positions.get(token_id):

@@ -184,7 +184,7 @@ class HttpListenerContext:
     def _order_loop(self):
         while not self._stop_event.wait(self.http_poll_interval):
             self.sync_order_from_http()
-        logger.info(f"{self.orders}, order loop is stopped")
+        logger.info(f"order loop is stopped")
 
     # -------------------------------------------------------------------------
     # HTTP sync (manual)
