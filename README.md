@@ -1,5 +1,22 @@
 # poly-position-watcher
 
+⚠️ **手续费（Fee / Taker Fee）注意事项**
+
+Polymarket 在部分市场已启用了 taker fee / maker rebate 机制。官方 API 对这些 market 会返回 `feeRateBps` 给下单时使用，但 **历史成交接口如 `get_trades` 并不会返回具体的手续费字段或手续费扣除明细**。
+
+因此：
+
+- 本仓位库基于成交价格与数量计算仓位、未实现 **手续费成本的扣除**；
+- 如果执行的是 **taker 交易**，该交易可能实际产生手续费但不会在 `get_trades` 中体现；
+- 所以本库返回的仓位、成本价、浮动盈亏等 **不包含任何手续费影响**；
+- 在有手续费的市场中，这将导致 **实际 PnL 相对于本库计算值存在偏差**（特别是高频交易或大量 taker 行为）。
+
+👉 如果你需要精确的净成本或净 PnL，请自行：
+- 从 CLOB fee-rate 或链上事件自行计算手续费，
+- 或将本库的结果视作 **pre-fee (fee-excluded)** 估算值；
+- 并根据你的策略/市场自行扣除 fee 估算。
+
+
 `poly-position-watcher` 简单的仓位 | 订单监控实现：
 
 - 通过 WebSocket 追踪实时 `TRADE` 与 `ORDER` 事件
