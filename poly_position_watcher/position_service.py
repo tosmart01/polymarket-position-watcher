@@ -10,11 +10,11 @@ import threading
 from datetime import datetime
 from queue import Queue, Empty
 from collections import defaultdict
-from typing import Dict
+from typing import Dict, List
 
 from poly_position_watcher.common.enums import Side
 from poly_position_watcher.common.logger import logger
-from poly_position_watcher.api_worker import HttpListenerContext
+from poly_position_watcher.api_worker import APIWorker, HttpFallbackManager
 
 from poly_position_watcher.schema.position_model import (
     UserPosition,
@@ -141,6 +141,7 @@ class PositionStore:
             outcome=outcome,
             created_at=datetime.fromtimestamp(position_result.last_update),
             is_failed=is_failed,
+            market_slug=trades[0].market_slug
         )
         return current
         # if exists_pos := self.positions.get(token_id):
@@ -196,8 +197,20 @@ class PositionWatcherService:
             client,
             ws_idle_timeout=60 * 60,
             wss_proxies: dict | None = None,
+            init_positions: bool = False,
+            enable_http_fallback: bool = False,
+            http_poll_interval: float = 3,
+            add_init_positions_to_http: bool = False,
     ):
         """
+        :param client: ClobClient instance
+        :param ws_idle_timeout: WebSocket idle timeout
+        :param wss_proxies: WebSocket proxy configuration
+        :param init_positions: Whether to initialize positions via official API
+        :param enable_http_fallback: Whether to enable HTTP fallback polling
+        :param http_poll_interval: HTTP polling interval in seconds
+        :param add_init_positions_to_http: Whether to add condition_ids from init_positions to HTTP monitoring
+        
         wss_proxies example: {
             "http_proxy_host": "127.0.0.1",
             "http_proxy_port": 8118,
@@ -208,6 +221,16 @@ class PositionWatcherService:
         self.user_address = self._resolve_user_address()
         self.position_store = PositionStore(self.user_address)
         self._wss_proxies = wss_proxies or {}
+
+        # New parameters
+        self.init_positions = init_positions
+        self.enable_http_fallback = enable_http_fallback
+        self.http_poll_interval = http_poll_interval
+        self.add_init_positions_to_http = add_init_positions_to_http
+
+        # Setup API worker
+        self.api_worker = APIWorker(self.client, self.user_address)
+
         # Setup WS client
         creds = self.client.creds or self.client.create_or_derive_api_creds()
         self.ws_client = PolymarketUserWS(
@@ -221,42 +244,58 @@ class PositionWatcherService:
 
         self._ws_thread = None
 
+        # HTTP fallback manager (if enabled)
+        self._http_fallback: HttpFallbackManager | None = None
+        if self.enable_http_fallback:
+            self._http_fallback = HttpFallbackManager(self, http_poll_interval)
+
     # -------------------------------------------------------------------------
     # Context: start/stop entire service
     # -------------------------------------------------------------------------
     def __enter__(self):
+        # Initialize positions if requested
+        init_condition_ids = []
+        if self.init_positions:
+            try:
+                initialize_trades = self.api_worker.fetch_trades_from_positions(self.user_address)
+                if not initialize_trades:
+                    return
+                for token_id, trades in initialize_trades.items():
+                    self.position_store.init_trades(trades)
+                positions_info = '\n'.join([
+                    f"slug={pos.market_slug}, price={pos.price}, size={pos.size:.4f},"
+                    f"volume={pos.volume:.4f}, token_id={pos.token_id}, outcome={pos.outcome}"
+                    for pos in self.position_store.positions.values()
+                ])
+                logger.info(f"Initialized positions:\n{positions_info}")
+            except Exception as e:
+                logger.error(f"Failed to initialize positions: {e}")
+
+        # Start WebSocket
         self.start()
+
+        # Start HTTP fallback if enabled (threads start even if sets are empty)
+        if self.enable_http_fallback and self._http_fallback:
+            self._http_fallback.start()
+
+            # Add init positions' condition_ids to HTTP monitoring if requested
+            if self.add_init_positions_to_http and init_condition_ids:
+                self._http_fallback.add(market_ids=init_condition_ids)
+                logger.info(f"Added {len(init_condition_ids)} condition_ids from init_positions to HTTP monitoring")
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # Stop HTTP fallback threads
+        if self._http_fallback:
+            self._http_fallback.stop()
         self.stop()
         return False
 
     # -------------------------------------------------------------------------
-    # Public factory: returns the context manager
-    # -------------------------------------------------------------------------
-    def http_listen(
-            self,
-            markets=None,
-            orders=None,
-            http_poll_interval: float = 3,
-            bootstrap_http: bool = False,
-    ):
-        """
-        如果在启动前已经有历史仓位需要: bootstrap_http=True
-        """
-        return HttpListenerContext(
-            self,
-            markets,
-            orders,
-            http_poll_interval=http_poll_interval,
-            bootstrap_http=bootstrap_http,
-        )
-
-    # -------------------------------------------------------------------------
     # Start / Stop
     # -------------------------------------------------------------------------
-    def start(self, bootstrap_http=True):
+    def start(self):
         # Start WebSocket
         if not self._ws_thread or not self._ws_thread.is_alive():
             self._ws_thread = threading.Thread(target=self.ws_client.start, daemon=True)
@@ -336,3 +375,38 @@ class PositionWatcherService:
         except Empty:
             # 超时未拿到订单更新时直接返回 None，由调用方自行判断
             return None
+
+    # -------------------------------------------------------------------------
+    # HTTP Fallback Management (delegates to HttpFallbackManager)
+    # -------------------------------------------------------------------------
+    def add_http_listen(self, order_ids: list[str] = None, market_ids: list[str] = None):
+        """
+        Add markets/orders to HTTP fallback polling.
+        
+        :param order_ids: List of order IDs to monitor
+        :param market_ids: List of market (condition) IDs to monitor
+        """
+        if not self.enable_http_fallback or not self._http_fallback:
+            logger.warning("HTTP fallback is not enabled. Enable it in __init__ to use this method.")
+            return
+
+        self._http_fallback.add(market_ids=market_ids, order_ids=order_ids)
+
+    def remove_http_listen(self, order_ids: list[str] = None, market_ids: list[str] = None):
+        """
+        Remove markets/orders from HTTP fallback polling.
+        
+        :param order_ids: List of order IDs to remove
+        :param market_ids: List of market (condition) IDs to remove
+        """
+        if not self.enable_http_fallback or not self._http_fallback:
+            return
+
+        self._http_fallback.remove(market_ids=market_ids, order_ids=order_ids)
+
+    def clear_http(self):
+        """Clear all HTTP fallback monitoring (threads keep running)."""
+        if not self.enable_http_fallback or not self._http_fallback:
+            return
+
+        self._http_fallback.clear()

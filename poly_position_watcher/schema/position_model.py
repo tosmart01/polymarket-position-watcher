@@ -60,6 +60,7 @@ class TradeMessage(BaseModel):
     trade_owner: Optional[str] = None
     fee_rate_bps: float
     created_at: datetime | None = None
+    market_slug: Optional[str] = ""
 
     @model_validator(mode="after")
     def validate_datetime(self):
@@ -125,6 +126,7 @@ class UserPosition(PrettyPrintBaseModel):
     market_id: Optional[str] = None
     outcome: Optional[str] = None
     created_at: datetime | None = None
+    market_slug: Optional[str] = ""
     is_failed: bool = False
 
 

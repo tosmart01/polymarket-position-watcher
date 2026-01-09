@@ -50,15 +50,28 @@ client = ClobClient(
     secret="<wallet-secret>",
 )
 
-with PositionWatcherService(client=client) as service:
-    # 可选：HTTP 轮询兜底历史仓位
-    with service.http_listen(markets=["<condition_id>"], bootstrap_http=True):
-        position: UserPosition = service.get_position("<token_id>")
-        position: UserPosition = service.blocking_get_position("<token_id>", timeout=5)
-        order: OrderMessage = service.get_order("<order_id>")
-        order: OrderMessage = service.blocking_get_order("<order_id>", timeout=3)
-        print(position)
-        print(order)
+with PositionWatcherService(
+    client=client,
+    init_positions=True,  # 通过官方 API 初始化仓位
+    enable_http_fallback=True,  # 启用 HTTP 兜底轮询
+    add_init_positions_to_http=True,  # 自动将初始化仓位的 condition_id 加入 HTTP 监控
+) as service:
+    # 非阻塞：获取当前仓位和订单（立即返回）
+    position: UserPosition = service.get_position("<token_id>")
+    order: OrderMessage = service.get_order("<order_id>")
+    print(position)
+    print(order)
+    
+    # 阻塞：等待仓位/订单更新（带超时）
+    position: UserPosition = service.blocking_get_position("<token_id>", timeout=5)
+    order: OrderMessage = service.blocking_get_order("<order_id>", timeout=3)
+    print(position)
+    print(order)
+    
+    # 可选：如果你新开了仓位/订单，需要通过 HTTP 兜底监控它们时，可以使用以下 API
+    # service.add_http_listen(market_ids=["<condition_id>"], order_ids=["<order_id>"])
+    # service.remove_http_listen(market_ids=["<condition_id>"], order_ids=["<order_id>"])
+    # service.clear_http()  # 清空所有监控项，但线程继续运行
 ```
 
 ### 完整示例（`examples/http_bootstrap_example.py`）
@@ -98,24 +111,36 @@ UserPosition(
 )
 ```
 
-> ⚠️ 注意：如果你是先启动监控再产生仓位，可令 `bootstrap_http=False` 且 `markets/orders` 参数为空列表即可；只有当已经存在历史仓位/订单需要补偿时才需要提前传入，并开启 `bootstrap_http=True`。
+### 仓位初始化
 
-### 只使用 HTTP 轮询
+当 `init_positions=True` 时，服务会：
+- 通过官方 Polymarket API (`/positions`) 获取当前仓位
+- 从仓位数据创建假交易以保持与现有基于交易的计算逻辑兼容
+- 跳过 `currentValue = 0` 的仓位（空仓位）
+- 如果 `add_init_positions_to_http=True`，可选择性地将 condition ID 添加到 HTTP 监控中
 
-`HttpListenerContext` 可在需要时单独使用：
+HTTP 兜底轮询线程在整个 `with` 语句生命周期内持续运行。可以动态添加/移除市场和订单，无需重启线程。
 
-```python
-with service.http_listen(markets=["<condition_id>"], http_poll_interval=2.5) as ctx:
-    ctx.add(markets=["other_condition_id"], orders=["<order_id>"])
-```
+> ⚠️ 注意：如果你在仓位产生之前启动监控器，设置 `init_positions=False`。HTTP 兜底可以独立启用，如果需要，将以空的监控集合启动。
 
-## 可选配置
+## 配置
+
+### 服务参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `init_positions` | bool | False | 启动时通过官方 Polymarket API 初始化仓位 |
+| `enable_http_fallback` | bool | False | 启用持久化 HTTP 轮询线程作为 WebSocket 兜底 |
+| `http_poll_interval` | float | 3.0 | HTTP 轮询间隔（秒） |
+| `add_init_positions_to_http` | bool | False | 自动将初始化仓位的 condition ID 添加到 HTTP 监控中 |
+
+### 环境变量
 
 | 环境变量 | 说明 |
 | --- | --- |
 | `poly_position_watcher_LOG_LEVEL` | 调整日志级别，默认为 `INFO` |
 
-若需要为 WebSocket 连接设置代理，可在实例化 `PositionWatcherService` 及 `http_listen` 前自行构造一个字典并通过 `wss_proxies` 传入，例如：
+若需要为 WebSocket 连接设置代理，可在实例化 `PositionWatcherService` 前自行构造一个字典并通过 `wss_proxies` 传入，例如：
 
 ```python
 PROXY = {"http_proxy_host": "127.0.0.1", "http_proxy_port": 7890}
