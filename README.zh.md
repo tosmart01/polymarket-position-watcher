@@ -17,6 +17,10 @@ Polymarket 在部分市场已启用了 taker fee / maker rebate 机制。官方 
 - 并根据你的策略/市场自行扣除 fee 估算。
 
 
+---
+
+## 概览
+
 `poly-position-watcher` 简单的仓位 | 订单监控实现：
 
 - 通过 WebSocket 追踪实时 `TRADE` 与 `ORDER` 事件

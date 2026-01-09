@@ -2,7 +2,9 @@
 
 English README (default). For Chinese: [README.zh.md](README.zh.md)
 
-## Fee notice (taker fee / maker rebate)
+---
+
+⚠️ **Fee notice (taker fee / maker rebate)**
 
 Some Polymarket markets have enabled a taker fee / maker rebate mechanism. The official API returns `feeRateBps` for order placement on those markets, but **historical trade endpoints (e.g. `get_trades`) do not return explicit fee fields or fee deductions**.
 
@@ -17,6 +19,10 @@ If you need precise net cost or net PnL:
 - compute fees yourself from CLOB fee-rate or on-chain events,
 - or treat this library as a **pre-fee (fee-excluded)** estimate,
 - and deduct fees based on your strategy/market.
+
+---
+
+## Overview
 
 `poly-position-watcher` is a lightweight position and order watcher:
 
