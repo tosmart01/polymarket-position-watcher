@@ -2,26 +2,6 @@
 
 English README (default). For Chinese: [README.zh.md](README.zh.md)
 
----
-
-⚠️ **Fee notice (taker fee / maker rebate)**
-
-Some Polymarket markets have enabled a taker fee / maker rebate mechanism. The official API returns `feeRateBps` for order placement on those markets, but **historical trade endpoints (e.g. `get_trades`) do not return explicit fee fields or fee deductions**.
-
-Therefore:
-
-- This library computes positions based on trade price and size and **does not deduct fee costs**.
-- If you executed **taker trades**, fees may have been charged but will not appear in `get_trades`.
-- Returned positions, cost basis, and unrealized PnL **exclude fees**.
-- In fee-enabled markets, **actual PnL will differ** from this library's results (especially with high-frequency or heavy taker activity).
-
-If you need precise net cost or net PnL:
-- compute fees yourself from CLOB fee-rate or on-chain events,
-- or treat this library as a **pre-fee (fee-excluded)** estimate,
-- and deduct fees based on your strategy/market.
-
----
-
 ## Overview
 
 `poly-position-watcher` is a lightweight position and order watcher:
@@ -31,6 +11,8 @@ If you need precise net cost or net PnL:
 - Maintain in-memory positions and order states per `token_id`, with blocking read APIs
 - Provide an extensible HTTP polling context as a WebSocket fallback
 - Built-in FIFO position calculator with mark-to-market valuation and PnL
+  
+**Note: The project automatically handles WSS disconnections and reconnections. No manual WebSocket management is required.**
 
 ## Installation
 
@@ -76,6 +58,25 @@ with PositionWatcherService(
     # service.remove_http_listen(market_ids=["<condition_id>"], order_ids=["<order_id>"])
     # service.clear_http()  # Clear all monitoring items, threads continue running
 ```
+
+### **⚠️ Fee notice (taker fee / maker rebate)**
+---
+
+Some Polymarket markets have enabled a taker fee / maker rebate mechanism. The official API returns `feeRateBps` for order placement on those markets, but **historical trade endpoints (e.g. `get_trades`) do not return explicit fee fields or fee deductions**.
+
+Therefore:
+
+- This library computes positions based on trade price and size and **does not deduct fee costs**.
+- If you executed **taker trades**, fees may have been charged but will not appear in `get_trades`.
+- Returned positions, cost basis, and unrealized PnL **exclude fees**.
+- In fee-enabled markets, **actual PnL will differ** from this library's results (especially with high-frequency or heavy taker activity).
+
+If you need precise net cost or net PnL:
+- compute fees yourself from CLOB fee-rate or on-chain events,
+- or treat this library as a **pre-fee (fee-excluded)** estimate,
+- and deduct fees based on your strategy/market.
+
+---
 
 ### Full example (`examples/http_bootstrap_example.py`)
 
