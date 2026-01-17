@@ -1,35 +1,39 @@
-import os
+# -*- coding = utf-8 -*-
+# @Time: 2026-01-13 14:40:20
+# @Author: PinBar
+# @Site: 
+# @File: log.py
+# @Software: PyCharm
+import logging
 import sys
 
-from loguru import logger
-
-_LOG_LEVEL = os.getenv("poly_position_watcher_LOG_LEVEL", "INFO").upper()
+LOGGER_NAME = "poly_position_watcher"
 
 
-def setup_logger() -> None:
-    logger.remove()
-    log_levels = {
-        "DEBUG": "DEBUG",
-        "INFO": "INFO",
-        "WARNING": "WARNING",
-        "ERROR": "ERROR",
-        "CRITICAL": "CRITICAL"
-    }
+def configure_logging(
+        level: int = logging.INFO,
+        stream=sys.stdout,
+        formatter: logging.Formatter | None = None,
+):
+    try:
+        from loguru import logger
+        return logger
+    except:
+        pass
+    if formatter is None:
+        formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(name)s | %(filename)s:%(lineno)d  %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(formatter)
+    target = logging.getLogger(LOGGER_NAME)
+    for existing in list(target.handlers):
+        if isinstance(existing, logging.StreamHandler):
+            target.removeHandler(existing)
+    target.addHandler(handler)
+    target.setLevel(level)
+    return target
 
-    level = log_levels.get(_LOG_LEVEL, "INFO")
 
-    # 配置控制台输出
-    logger.add(
-        sys.stdout,
-        level=level,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-               "<level>{level: <8}</level> | "
-               "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-               "<level>{message}</level>",
-        colorize=True,
-        backtrace=True,
-        diagnose=True,
-    )
-
-
-setup_logger()
+logger = configure_logging()
