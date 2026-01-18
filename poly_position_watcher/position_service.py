@@ -258,16 +258,15 @@ class PositionWatcherService:
         if self.init_positions:
             try:
                 initialize_trades = self.api_worker.fetch_trades_from_positions(self.user_address)
-                if not initialize_trades:
-                    return
-                for token_id, trades in initialize_trades.items():
-                    self.position_store.init_trades(trades)
-                positions_info = '\n'.join([
-                    f"slug={pos.market_slug}, price={pos.price}, size={pos.size:.4f},"
-                    f"volume={pos.volume:.4f}, token_id={pos.token_id}, outcome={pos.outcome}"
-                    for pos in self.position_store.positions.values()
-                ])
-                logger.info(f"Initialized positions:\n{positions_info}")
+                if initialize_trades:
+                    for token_id, trades in initialize_trades.items():
+                        self.position_store.init_trades(trades)
+                    positions_info = '\n'.join([
+                        f"slug={pos.market_slug}, price={pos.price}, size={pos.size:.4f},"
+                        f"volume={pos.volume:.4f}, token_id={pos.token_id}, outcome={pos.outcome}"
+                        for pos in self.position_store.positions.values()
+                    ])
+                    logger.info(f"Initialized positions:\n{positions_info}")
             except Exception as e:
                 logger.error(f"Failed to initialize positions: {e}")
 
