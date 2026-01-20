@@ -40,8 +40,14 @@ def calculate_position_from_trades(
     buy_events = []
     sell_events = []
 
-    def apply_fee(size: float, price: float, fee_rate_bps: float) -> float:
-        if not enable_fee_calc or fee_rate_bps <= 0:
+    def apply_fee(
+        size: float, price: float, fee_rate_bps: float, trader_side: str | None
+    ) -> float:
+        if (
+            not enable_fee_calc
+            or fee_rate_bps <= 0
+            or trader_side != "TAKER"
+        ):
             return size
         calc = fee_calc_fn or _default_fee_calc
         return calc(size, price, fee_rate_bps)
@@ -55,7 +61,9 @@ def calculate_position_from_trades(
             if order.maker_address.upper() != user_address.upper():
                 continue
             is_maker_order = True
-            size = apply_fee(order.size, order.price, order.fee_rate_bps)
+            size = apply_fee(
+                order.size, order.price, order.fee_rate_bps, trade.trader_side
+            )
 
             if order.side == Side.BUY:
                 buy_events.append((size, order.price, trade.match_time))
@@ -64,7 +72,9 @@ def calculate_position_from_trades(
 
         # taker 部分
         if not is_maker_order and trade.maker_address.upper() == user_address.upper():
-            size = apply_fee(trade.size, trade.price, trade.fee_rate_bps)
+            size = apply_fee(
+                trade.size, trade.price, trade.fee_rate_bps, trade.trader_side
+            )
             if trade.side == Side.BUY:
                 buy_events.append((size, trade.price, trade.match_time))
             else:

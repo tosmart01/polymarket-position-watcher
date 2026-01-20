@@ -58,6 +58,7 @@ class TradeMessage(BaseModel):
     match_time: int | None = None
     last_update: int | None = None
     trade_owner: Optional[str] = None
+    trader_side: Optional[Literal["MAKER", "TAKER"]] = None
     fee_rate_bps: float
     created_at: datetime | None = None
     market_slug: Optional[str] = ""
