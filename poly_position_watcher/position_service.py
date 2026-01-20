@@ -10,7 +10,7 @@ import threading
 from datetime import datetime
 from queue import Queue, Empty
 from collections import defaultdict
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 from poly_position_watcher.common.enums import Side
 from poly_position_watcher.common.logger import logger
@@ -30,8 +30,15 @@ class PositionStore:
     Keeps an in-memory view of per-market trades and exposes aggregated positions.
     """
 
-    def __init__(self, user_address: str):
+    def __init__(
+            self,
+            user_address: str,
+            enable_fee_calc: bool = False,
+            fee_calc_fn: Callable[[float, float, float], float] | None = None,
+    ):
         self.user_address = user_address
+        self.enable_fee_calc = enable_fee_calc
+        self.fee_calc_fn = fee_calc_fn
         self.trades_by_token: Dict[str, Dict[str, TradeMessage]] = defaultdict(dict)
         self.positions: Dict[str, UserPosition] = {}
         self.orders: Dict[str, OrderMessage] = {}
@@ -129,7 +136,10 @@ class PositionStore:
     ) -> UserPosition | None:
         is_failed = any(trade.status == "FAILED" for trade in trades)
         position_result = calculate_position_from_trades(
-            trades, user_address=self.user_address
+            trades,
+            user_address=self.user_address,
+            enable_fee_calc=self.enable_fee_calc,
+            fee_calc_fn=self.fee_calc_fn,
         )
         current = UserPosition(
             price=position_result.avg_price,
@@ -201,6 +211,8 @@ class PositionWatcherService:
             enable_http_fallback: bool = False,
             http_poll_interval: float = 3,
             add_init_positions_to_http: bool = False,
+            enable_fee_calc: bool = False,
+            fee_calc_fn: Callable[[float, float, float], float] | None = None,
     ):
         """
         :param client: ClobClient instance
@@ -210,6 +222,8 @@ class PositionWatcherService:
         :param enable_http_fallback: Whether to enable HTTP fallback polling
         :param http_poll_interval: HTTP polling interval in seconds
         :param add_init_positions_to_http: Whether to add condition_ids from init_positions to HTTP monitoring
+        :param enable_fee_calc: Whether to apply fee adjustments in position calc
+        :param fee_calc_fn: Optional custom fee function (size, price, fee_rate_bps) -> new_size
         
         wss_proxies example: {
             "http_proxy_host": "127.0.0.1",
@@ -219,7 +233,11 @@ class PositionWatcherService:
         """
         self.client = client
         self.user_address = self._resolve_user_address()
-        self.position_store = PositionStore(self.user_address)
+        self.position_store = PositionStore(
+            self.user_address,
+            enable_fee_calc=enable_fee_calc,
+            fee_calc_fn=fee_calc_fn,
+        )
         self._wss_proxies = wss_proxies or {}
 
         # New parameters

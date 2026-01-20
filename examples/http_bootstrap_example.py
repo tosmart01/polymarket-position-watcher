@@ -34,6 +34,10 @@ def main() -> None:
         "proxy_type": "http",
     }
 
+    def fee_calc(size: float, price: float, fee_rate_bps: float) -> float:
+        fee = 0.25 * (price * (1 - price)) ** 2 * (fee_rate_bps / 1000)
+        return (1 - fee) * size
+
     # 单一 with 语句：初始化仓位并通过 HTTP 兜底监控
     with PositionWatcherService(
             client=client,
@@ -42,6 +46,8 @@ def main() -> None:
             enable_http_fallback=True,  # 启用 HTTP 兜底（线程常驻运行）
             http_poll_interval=3,  # HTTP 轮询间隔（秒）
             add_init_positions_to_http=True,  # 将初始化仓位得到的 condition_id 加入 HTTP 监控
+            enable_fee_calc=True,  # 是否启用手续费计算
+            fee_calc_fn=fee_calc,  # 自定义手续费函数（可选）
     ) as service:
         # 非阻塞获取
         position = service.get_position(token_id)

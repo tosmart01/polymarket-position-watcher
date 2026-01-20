@@ -5,7 +5,7 @@
 # @File: trade_calculator.py
 # @Software: PyCharm
 from collections import deque
-from typing import List
+from typing import Callable, List
 
 from poly_position_watcher.common.enums import Side
 from poly_position_watcher.schema.position_model import (
@@ -15,8 +15,17 @@ from poly_position_watcher.schema.position_model import (
 )
 
 
+def _default_fee_calc(size: float, price: float, fee_rate_bps: float) -> float:
+    fee_multiplier = fee_rate_bps / 1000 if fee_rate_bps else 0.0
+    fee = 0.25 * (price * (1 - price)) ** 2 * fee_multiplier
+    return (1 - fee) * size
+
+
 def calculate_position_from_trades(
-    trades: List[TradeMessage], user_address: str
+    trades: List[TradeMessage],
+    user_address: str,
+    enable_fee_calc: bool = False,
+    fee_calc_fn: Callable[[float, float, float], float] | None = None,
 ) -> PositionResult:
     """
     根据交易记录直接计算用户仓位（带浮点误差修正）
@@ -31,6 +40,12 @@ def calculate_position_from_trades(
     buy_events = []
     sell_events = []
 
+    def apply_fee(size: float, price: float, fee_rate_bps: float) -> float:
+        if not enable_fee_calc or fee_rate_bps <= 0:
+            return size
+        calc = fee_calc_fn or _default_fee_calc
+        return calc(size, price, fee_rate_bps)
+
     # --- 1. 解析所有交易 ---
     for trade in trades:
         is_maker_order = False
@@ -40,18 +55,20 @@ def calculate_position_from_trades(
             if order.maker_address.upper() != user_address.upper():
                 continue
             is_maker_order = True
+            size = apply_fee(order.size, order.price, order.fee_rate_bps)
 
             if order.side == Side.BUY:
-                buy_events.append((order.size, order.price, trade.match_time))
+                buy_events.append((size, order.price, trade.match_time))
             else:
-                sell_events.append((-order.size, order.price, trade.match_time))
+                sell_events.append((-size, order.price, trade.match_time))
 
         # taker 部分
         if not is_maker_order and trade.maker_address.upper() == user_address.upper():
+            size = apply_fee(trade.size, trade.price, trade.fee_rate_bps)
             if trade.side == Side.BUY:
-                buy_events.append((trade.size, trade.price, trade.match_time))
+                buy_events.append((size, trade.price, trade.match_time))
             else:
-                sell_events.append((-trade.size, trade.price, trade.match_time))
+                sell_events.append((-size, trade.price, trade.match_time))
 
     # --- 2. 时间排序 ---
     all_events = sorted(buy_events + sell_events, key=lambda x: x[2])

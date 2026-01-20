@@ -40,6 +40,8 @@ with PositionWatcherService(
     init_positions=True,  # Initialize positions via official API
     enable_http_fallback=True,  # Enable HTTP polling fallback
     add_init_positions_to_http=True,  # Auto-add condition_ids from init positions to HTTP monitoring
+    enable_fee_calc=True,  # Optional: enable fee adjustments
+    # fee_calc_fn=custom_fee_fn,  # Optional: override fee formula
 ) as service:
     # Non-blocking: Get current positions and orders (returns immediately)
     position: UserPosition = service.get_position("<token_id>")
@@ -105,15 +107,19 @@ Some Polymarket markets have enabled a taker fee / maker rebate mechanism. The o
 
 Therefore:
 
-- This library computes positions based on trade price and size and **does not deduct fee costs**.
+- By default, this library computes positions based on trade price and size and **does not deduct fee costs**.
 - If you executed **taker trades**, fees may have been charged but will not appear in `get_trades`.
 - Returned positions, cost basis, and unrealized PnL **exclude fees**.
 - In fee-enabled markets, **actual PnL will differ** from this library's results (especially with high-frequency or heavy taker activity).
 
 If you need precise net cost or net PnL:
 - compute fees yourself from CLOB fee-rate or on-chain events,
+- or enable fee calculation via `enable_fee_calc=True` (uses `feeRateBps` from trades/orders),
 - or treat this library as a **pre-fee (fee-excluded)** estimate,
 - and deduct fees based on your strategy/market.
+
+Default fee formula (when `fee_calc_fn` is not provided):
+`fee = 0.25 * (p * (1 - p)) ** 2 * (fee_rate_bps / 1000)`, and `new_size = (1 - fee) * size`.
 
 ---
 
@@ -139,6 +145,8 @@ The HTTP fallback polling threads run persistently throughout the `with` stateme
 | `enable_http_fallback` | bool | False | Enable persistent HTTP polling threads as WebSocket fallback |
 | `http_poll_interval` | float | 3.0 | HTTP polling interval in seconds |
 | `add_init_positions_to_http` | bool | False | Automatically add condition IDs from initialized positions to HTTP monitoring |
+| `enable_fee_calc` | bool | False | Apply fee adjustments using `feeRateBps` from trades/orders |
+| `fee_calc_fn` | callable | None | Custom fee function: `(size, price, fee_rate_bps) -> new_size` |
 
 ### Environment Variables
 
