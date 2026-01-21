@@ -46,6 +46,8 @@ with PositionWatcherService(
     order: OrderMessage = service.get_order("<order_id>")
     print(position)
     print(order)
+    service.show_positions(limit=10)
+    service.show_orders(limit=10)
     
     # 阻塞：等待仓位/订单更新（带超时）
     position: UserPosition = service.blocking_get_position("<token_id>", timeout=5)
@@ -95,6 +97,15 @@ UserPosition(
 ```
 
 **完整示例（`examples/http_bootstrap_example.py`）**
+
+## 友好打印
+
+```python
+service.show_positions(limit=10)
+service.show_orders(limit=10)
+```
+
+![Positions Table](asset/show_position.png)
 
 ## ⚠️ **手续费（Fee / Taker Fee）注意事项**
 Polymarket 在部分市场已启用了 taker fee / maker rebate 机制。官方 API 对这些 market 会返回 `feeRateBps` 给下单时使用，但 **历史成交接口如 `get_trades` 并不会返回具体的手续费字段或手续费扣除明细**。

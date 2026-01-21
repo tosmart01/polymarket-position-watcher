@@ -102,6 +102,7 @@ class OrderMessage(PrettyPrintBaseModel):
     filled: bool = False
     status: Optional[str] = None
     created_at: datetime | None = None
+    market_slug: Optional[str] = ""
 
     @field_validator(
         "size_matched", "price", "original_size", "timestamp", mode="before"

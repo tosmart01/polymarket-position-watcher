@@ -61,6 +61,8 @@ def main() -> None:
         )
         print(order)
         print(position)
+        service.show_positions(limit=10)
+        service.show_orders(limit=10)
 
         # 动态添加 HTTP 监控的市场和订单（HTTP 线程已经在运行）
         service.add_http_listen(market_ids=market_ids, order_ids=order_ids)

@@ -48,6 +48,8 @@ with PositionWatcherService(
     order: OrderMessage = service.get_order("<order_id>")
     print(position)
     print(order)
+    service.show_positions(limit=10)
+    service.show_orders(limit=10)
     
     # Blocking: Wait for position/order updates (with timeout)
     position: UserPosition = service.blocking_get_position("<token_id>", timeout=5)
@@ -99,6 +101,15 @@ UserPosition(
 
 
 **Full example (`examples/http_bootstrap_example.py`)**
+
+## Pretty printing
+
+```python
+service.show_positions(limit=10)
+service.show_orders(limit=10)
+```
+
+![Positions Table](asset/show_position.png)
 
 ## **⚠️ Fee notice (taker fee / maker rebate)**
 ---

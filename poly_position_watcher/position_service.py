@@ -22,6 +22,9 @@ from poly_position_watcher.schema.position_model import (
     OrderMessage,
 )
 from poly_position_watcher.trade_calculator import calculate_position_from_trades
+
+from rich.console import Console
+from rich.table import Table
 from poly_position_watcher.wss_worker import PolymarketUserWS
 
 
@@ -135,6 +138,7 @@ class PositionStore:
             self, trades: list[TradeMessage], token_id, outcome: str
     ) -> UserPosition | None:
         is_failed = any(trade.status == "FAILED" for trade in trades)
+        market_slug = next((trade.market_slug for trade in trades if trade.market_slug), "")
         position_result = calculate_position_from_trades(
             trades,
             user_address=self.user_address,
@@ -151,7 +155,7 @@ class PositionStore:
             outcome=outcome,
             created_at=datetime.fromtimestamp(position_result.last_update),
             is_failed=is_failed,
-            market_slug=trades[0].market_slug
+            market_slug=market_slug,
         )
         return current
         # if exists_pos := self.positions.get(token_id):
@@ -362,6 +366,164 @@ class PositionWatcherService:
         if position := self.position_store.get_token_position(token_id):
             return position
         return UserPosition(token_id=token_id, price=0, size=0, volume=0, last_update=0)
+
+    @staticmethod
+    def _truncate(value: str, limit: int) -> str:
+        if len(value) <= limit:
+            return value
+        keep = max(limit - 3, 0)
+        head = keep // 2
+        tail = keep - head
+        return f"{value[:head]}...{value[-tail:]}" if keep else "..."
+
+    def show_positions(
+            self, limit: int | None = None, max_width: int = 24
+    ) -> str:
+        """
+        Pretty print current positions and return the rendered table.
+        """
+        store = self.position_store
+        with store._lock:
+            positions = list(store.positions.values())
+        if not positions:
+            output = "No positions."
+            print(output)
+            return output
+
+        rows = []
+        for pos in positions:
+            last_update = (
+                datetime.fromtimestamp(pos.last_update).strftime("%Y-%m-%d %H:%M:%S")
+                if pos.last_update
+                else ""
+            )
+            rows.append({
+                "slug": pos.market_slug or "",
+                "outcome": pos.outcome or "",
+                "token_id": pos.token_id or "",
+                "price": f"{pos.price:.3f}",
+                "size": f"{pos.size:.3f}",
+                "volume": f"{pos.volume:.4f}",
+                "updated_at": last_update,
+            })
+
+        rows.sort(key=lambda r: abs(float(r["volume"])), reverse=True)
+        if limit:
+            rows = rows[:limit]
+        headers = ["slug", "outcome", "token_id", "price", "size", "volume", "updated_at"]
+        table = Table(title="Positions", show_lines=False, show_footer=True)
+        table.add_column("slug", style="cyan")
+        table.add_column("outcome", style="magenta")
+        table.add_column("price", justify="right")
+        table.add_column("size", justify="right")
+        table.add_column("volume", justify="right")
+        table.add_column("updated_at", style="dim")
+        table.add_column("token_id", style="yellow", no_wrap=True)
+
+        total_size = 0.0
+        total_volume = 0.0
+        for row in rows:
+            try:
+                total_size += float(row["size"])
+                total_volume += float(row["volume"])
+            except ValueError:
+                pass
+            table.add_row(
+                row["slug"],
+                row["outcome"],
+                row["price"],
+                row["size"],
+                row["volume"],
+                row["updated_at"],
+                self._truncate(row["token_id"], max_width),
+            )
+        if rows:
+            table.columns[0].footer = "TOTAL"
+            table.columns[3].footer = f"{total_size:.4f}"
+            table.columns[4].footer = f"{total_volume:.4f}"
+        console = Console()
+        console.print(table)
+        record_console = Console(record=True)
+        record_console.print(table)
+        return record_console.export_text()
+
+    def show_orders(
+            self, limit: int | None = None, max_width: int = 24
+    ) -> str:
+        """
+        Pretty print current orders and return the rendered table.
+        """
+        store = self.position_store
+        with store._lock:
+            orders = list(store.orders.values())
+        if not orders:
+            output = "No orders."
+            print(output)
+            return output
+
+        rows = []
+        for order in orders:
+            created_at = (
+                datetime.fromtimestamp(order.timestamp / 1000).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                if order.timestamp
+                else ""
+            )
+            rows.append({
+                "slug": order.market_slug or "",
+                "outcome": order.outcome or "",
+                "order_id": order.id or "",
+                "side": order.side or "",
+                "price": f"{order.price:.3f}",
+                "size_matched": f"{order.size_matched:.4f}",
+                "original_size": f"{order.original_size or 0.0:.4f}",
+                "status": order.status or "",
+                "created_at": created_at,
+            })
+        rows.sort(key=lambda r: abs(float(r["size_matched"])), reverse=True)
+        if limit:
+            rows = rows[:limit]
+        table = Table(title="Orders", show_lines=False, show_footer=True)
+        table.add_column("slug", style="cyan")
+        table.add_column("outcome", style="magenta")
+        table.add_column("side", style="green")
+        table.add_column("price", justify="right")
+        table.add_column("size_matched", justify="right")
+        table.add_column("original_size", justify="right")
+        table.add_column("status", style="blue")
+        table.add_column("created_at", style="dim")
+        table.add_column("order_id", style="yellow", no_wrap=True)
+
+        total_size_matched = 0.0
+        total_original_size = 0.0
+        for row in rows:
+            try:
+                total_size_matched += float(row["size_matched"])
+                total_original_size += float(row["original_size"])
+            except ValueError:
+                pass
+            table.add_row(
+                row["slug"],
+                row["outcome"],
+                row["side"],
+                row["price"],
+                row["size_matched"],
+                row["original_size"],
+                row["status"],
+                row["created_at"],
+                self._truncate(row["order_id"], max_width),
+            )
+        if rows:
+            table.columns[0].footer = "TOTAL"
+            table.columns[4].footer = f"{total_size_matched:.3f}"
+            table.columns[5].footer = f"{total_original_size:.4f}"
+
+        console = Console()
+        console.print(table)
+        record_console = Console(record=True)
+        record_console.print(table)
+        return record_console.export_text()
 
     def get_order_by_token(self, token_id: str) -> list[OrderMessage]:
         return self.position_store.get_token_order(token_id)

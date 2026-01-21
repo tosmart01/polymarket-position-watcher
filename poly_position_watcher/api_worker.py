@@ -122,7 +122,7 @@ class APIWorker:
         positions = self.fetch_positions(user_address)
         if not positions:
             logger.warning("No positions found from API")
-            return []
+            return {}
 
         initialize_trades: dict[str, list[TradeMessage]] = {}
 
@@ -133,6 +133,11 @@ class APIWorker:
                     continue
                 token_id = pos.get("asset")
                 trades = self.fetch_trades(market=pos.get("conditionId"))
+                market_slug = pos.get("slug")
+                if market_slug:
+                    for trade in trades:
+                        if not trade.market_slug:
+                            trade.market_slug = market_slug
                 initialize_trades[token_id] = trades
             except Exception as e:
                 logger.error(f"Failed to create fake trade from position {pos.get('asset', 'unknown')}: {e}")
@@ -154,6 +159,37 @@ class APIWorker:
                 condition_ids.append(condition_id)
         return condition_ids
 
+    def fetch_market_slugs(self, condition_ids: list[str]) -> dict[str, str]:
+        """
+        Fetch market slugs from Gamma API by condition_ids.
+
+        :param condition_ids: List of condition IDs
+        :return: Mapping of condition_id -> slug
+        """
+        if not condition_ids:
+            return {}
+        url = "https://gamma-api.polymarket.com/markets"
+        params = [("condition_ids", cid) for cid in condition_ids]
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch market slugs from Gamma API: {e}")
+            return {}
+
+        markets = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(markets, list):
+            return {}
+
+        slug_map: dict[str, str] = {}
+        for market in markets:
+            condition_id = market.get("conditionId") or market.get("condition_id")
+            slug = market.get("slug")
+            if condition_id and slug:
+                slug_map[condition_id] = slug
+        return slug_map
+
 
 class HttpFallbackManager:
     """
@@ -166,6 +202,7 @@ class HttpFallbackManager:
         self.http_poll_interval = http_poll_interval
         # Use service's existing APIWorker instance
         self.api_worker = service.api_worker
+        self._slug_cache: dict[str, str] = {}
         
         # Thread-safe sets for markets and orders
         self._lock = threading.RLock()
@@ -246,6 +283,7 @@ class HttpFallbackManager:
         """Trade polling loop - runs continuously until stopped."""
         while not self._stop_event.wait(self.http_poll_interval):
             try:
+                self._update_missing_market_slugs()
                 with self._lock:
                     markets = list(self.markets)
                 
@@ -276,6 +314,7 @@ class HttpFallbackManager:
         """Order polling loop - runs continuously until stopped."""
         while not self._stop_event.wait(self.http_poll_interval):
             try:
+                self._update_missing_market_slugs()
                 with self._lock:
                     order_ids = list(self.orders)
                 
@@ -307,6 +346,49 @@ class HttpFallbackManager:
         
         logger.info("Order polling loop stopped")
 
+    def _update_missing_market_slugs(self):
+        try:
+            condition_ids: set[str] = set()
+            pending_positions = []
+            store = self.service.position_store
+            with store._lock:
+                for pos in store.positions.values():
+                    if not pos.market_id:
+                        continue
+                    if not pos.market_slug and pos.market_id in self._slug_cache:
+                        pos.market_slug = self._slug_cache[pos.market_id]
+                    if not pos.market_slug:
+                        pending_positions.append(pos)
+                        condition_ids.add(pos.market_id)
+                for order in store.orders.values():
+                    if not order.market:
+                        continue
+                    if not order.market_slug and order.market in self._slug_cache:
+                        order.market_slug = self._slug_cache[order.market]
+                    if not order.market_slug:
+                        condition_ids.add(order.market)
+            if not condition_ids:
+                return
+            slug_map = self.api_worker.fetch_market_slugs(list(condition_ids))
+            if not slug_map:
+                return
+            self._slug_cache.update(slug_map)
+            if not pending_positions:
+                pending_positions = []
+            with store._lock:
+                for pos in pending_positions:
+                    if not pos.market_slug and pos.market_id in self._slug_cache:
+                        pos.market_slug = self._slug_cache[pos.market_id]
+                for order in store.orders.values():
+                    if (
+                        order.market
+                        and not order.market_slug
+                        and order.market in self._slug_cache
+                    ):
+                        order.market_slug = self._slug_cache[order.market]
+        except Exception as e:
+            logger.error(f"Failed to update market slugs: {e}")
+
 
 class HttpListenerContext:
     """
@@ -332,6 +414,7 @@ class HttpListenerContext:
         self.http_poll_interval = http_poll_interval
         self.bootstrap_http = bootstrap_http
         self.api_worker = APIWorker(self.service.client, self.service.user_address)
+        self._slug_cache: dict[str, str] = {}
 
         # Local thread control
         self._stop_event = threading.Event()
@@ -403,13 +486,52 @@ class HttpListenerContext:
 
     def _trade_loop(self):
         while not self._stop_event.wait(self.http_poll_interval):
+            self._update_missing_market_slugs()
             self.sync_trade_from_http()
         logger.info(f"{self.markets}, trade loop is stopped")
 
     def _order_loop(self):
         while not self._stop_event.wait(self.http_poll_interval):
+            self._update_missing_market_slugs()
             self.sync_order_from_http()
         logger.info(f"order loop is stopped")
+
+    def _update_missing_market_slugs(self):
+        condition_ids: set[str] = set()
+        pending_positions = []
+        store = self.service.position_store
+        with store._lock:
+            for pos in store.positions.values():
+                if not pos.market_id:
+                    continue
+                if not pos.market_slug and pos.market_id in self._slug_cache:
+                    pos.market_slug = self._slug_cache[pos.market_id]
+                if not pos.market_slug:
+                    pending_positions.append(pos)
+                    condition_ids.add(pos.market_id)
+            for order in store.orders.values():
+                if not order.market:
+                    continue
+                if not order.market_slug and order.market in self._slug_cache:
+                    order.market_slug = self._slug_cache[order.market]
+                if not order.market_slug:
+                    condition_ids.add(order.market)
+
+        if not condition_ids:
+            return
+        slug_map = self.api_worker.fetch_market_slugs(list(condition_ids))
+        if not slug_map:
+            return
+        self._slug_cache.update(slug_map)
+        if not pending_positions:
+            pending_positions = []
+        with store._lock:
+            for pos in pending_positions:
+                if not pos.market_slug and pos.market_id in self._slug_cache:
+                    pos.market_slug = self._slug_cache[pos.market_id]
+            for order in store.orders.values():
+                if order.market and not order.market_slug and order.market in self._slug_cache:
+                    order.market_slug = self._slug_cache[order.market]
 
     # -------------------------------------------------------------------------
     # HTTP sync (manual)
