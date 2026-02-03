@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6
+- fix trade message missing, using last_update for update
+
+
 ## 0.2.5
 
 - Add rich table output with `show_positions`/`show_orders` and size/volume totals.
