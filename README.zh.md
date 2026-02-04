@@ -2,15 +2,13 @@
 
 ## 概览
 
-`poly-position-watcher` 简单的仓位 | 订单监控实现：
+`poly-position-watcher` 专注实时仓位与订单监控：
 
-- 通过 WebSocket 追踪实时 `TRADE` 与 `ORDER` 事件
-- 把 HTTP API 的历史数据和 WebSocket 增量数据统一成同一套 Pydantic 模型
-- 在内存中维护每个 `token_id` 的仓位、订单状态及阻塞式读取接口
-- 提供易于扩展的 HTTP 轮询上下文（在 WebSocket 之外兜底同步）
-- 内置 FIFO 仓位计算器，支持带市价估值与盈亏指标
+- WSS 实时追踪 `TRADE` 与 `ORDER`（仓位 + 订单）
+- HTTP 轮询兜底，保证可用性
+- 可选手续费计算（开关 + 自定义公式）
 
-**当前项目已内置 WebSocket（WSS）异常检测与自动重连机制。当出现网络波动、连接中断或服务端主动断开等情况时，程序会自动进行重连处理，无需用户手动干预或额外配置。使用方无需关心 WSS 连接的稳定性问题，只需关注业务逻辑即可。**
+**说明：WSS 断线会自动检测并重连。**
 
 ## 安装
 
@@ -108,20 +106,11 @@ service.show_orders(limit=10)
 ![Positions Table](asset/show_position.png)
 
 ## ⚠️ **手续费（Fee / Taker Fee）注意事项**
-Polymarket 在部分市场已启用了 taker fee / maker rebate 机制。官方 API 对这些 market 会返回 `feeRateBps` 给下单时使用，但 **历史成交接口如 `get_trades` 并不会返回具体的手续费字段或手续费扣除明细**。
+Polymarket 在部分市场启用 taker fee / maker rebate。本库 **已完整支持手续费计算**，并可按需控制：
 
-因此：
-
-- 默认情况下，本仓位库基于成交价格与数量计算仓位、未实现 **手续费成本的扣除**；
-- 如果执行的是 **taker 交易**，该交易可能实际产生手续费但不会在 `get_trades` 中体现；
-- 所以本库返回的仓位、成本价、浮动盈亏等 **不包含任何手续费影响**；
-- 在有手续费的市场中，这将导致 **实际 PnL 相对于本库计算值存在偏差**（特别是高频交易或大量 taker 行为）。
-
-👉 如果你需要精确的净成本或净 PnL，请自行：
-- 从 CLOB fee-rate 或链上事件自行计算手续费，
-- 或通过 `enable_fee_calc=True` 启用手续费计算（使用 trades/orders 中的 `feeRateBps`），
-- 或将本库的结果视作 **pre-fee (fee-excluded)** 估算值；
-- 并根据你的策略/市场自行扣除 fee 估算。
+- 通过 `enable_fee_calc=True` 开启，基于 trades/orders 的 `feeRateBps` 计算
+- 通过 `fee_calc_fn` 自定义手续费公式
+- 不开启（默认）则按 pre-fee 方式计算
 
 默认手续费公式（未传 `fee_calc_fn` 时）：
 `fee = 0.25 * (p * (1 - p)) ** 2 * (fee_rate_bps / 1000)`，`new_size = (1 - fee) * size`。
