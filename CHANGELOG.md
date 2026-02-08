@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.8
+- minor cleanup for failed trade size reporting
+
 ## 0.2.7
 - track failed trades separately and expose failed size in user positions
 - skip failed trades when calculating positions and log failed trade details

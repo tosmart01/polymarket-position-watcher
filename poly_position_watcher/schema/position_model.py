@@ -134,8 +134,8 @@ class UserPosition(PrettyPrintBaseModel):
     failed_trades: list[TradeMessage] = Field(default_factory=list)
 
     @property
-    def failed_size(self) -> float | None:
-        return sum([i.size for i in self.failed_trades])
+    def failed_size(self) -> float:
+        return sum(i.size for i in self.failed_trades)
 
 
 class PositionDetails(BaseModel):

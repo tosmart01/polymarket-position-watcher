@@ -14,3 +14,4 @@ dist/
 .idea
 dist
 poly_position_watcher.egg-info
+uv.lock

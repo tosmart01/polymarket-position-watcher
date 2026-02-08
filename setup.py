@@ -24,7 +24,7 @@ for cache_dir in HERE.rglob("__pycache__"):
 
 setup(
     name=PROJECT.get("name", "poly-position-watcher"),
-    version=PROJECT.get("version", "0.2.7"),
+    version=PROJECT.get("version", "0.2.8"),
     description=PROJECT.get("description", ""),
     long_description=README_PATH.read_text(encoding="utf-8") if README_PATH.exists() else "",
     long_description_content_type="text/markdown",
