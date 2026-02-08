@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+- track failed trades separately and expose failed size in user positions
+- skip failed trades when calculating positions and log failed trade details
+- allow equal last_update trades to refresh stored entries
+- reduce HTTP poll interval default to 1.5s
+
 ## 0.2.6
 - fix trade message missing, using last_update for update
 

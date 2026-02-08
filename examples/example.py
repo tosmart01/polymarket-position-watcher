@@ -44,7 +44,7 @@ def main() -> None:
             wss_proxies=wss_proxy,
             init_positions=True,  # 通过官方 API 初始化现有仓位
             enable_http_fallback=True,  # 启用 HTTP 兜底（线程常驻运行）
-            http_poll_interval=3,  # HTTP 轮询间隔（秒）
+            http_poll_interval=1.5,  # HTTP 轮询间隔（秒）
             add_init_positions_to_http=True,  # 将初始化仓位得到的 condition_id 加入 HTTP 监控
             enable_fee_calc=True,  # 是否启用手续费计算
             fee_calc_fn=fee_calc,  # 自定义手续费函数（可选）
@@ -61,11 +61,18 @@ def main() -> None:
         )
         print(order)
         print(position)
+        if position:
+            print("sellable_size:", position.sellable_size)
+            if position.has_failed:
+                print("failed_trades:", position.failed_trades)
         service.show_positions(limit=10)
         service.show_orders(limit=10)
 
         # 动态添加 HTTP 监控的市场和订单（HTTP 线程已经在运行）
         service.add_http_listen(market_ids=market_ids, order_ids=order_ids)
+        # 直接替换监控列表（覆盖已有列表）
+        service.set_market_http_listen(market_ids=market_ids)
+        service.set_order_http_listen(order_ids=order_ids)
         # 可以动态移除或清空 HTTP 监控（线程继续运行）
         service.remove_http_listen(market_ids=market_ids, order_ids=order_ids)
         service.clear_http()  # 清空所有监控项，但线程继续运行

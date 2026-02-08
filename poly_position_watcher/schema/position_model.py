@@ -7,9 +7,9 @@
 from datetime import datetime
 from typing import List, Optional, Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from poly_position_watcher.common.enums import Side
+from poly_position_watcher.common.enums import Side, TradeStatus
 from poly_position_watcher.schema.base import PrettyPrintBaseModel
 
 
@@ -52,7 +52,7 @@ class TradeMessage(BaseModel):
     price: float
     side: Side
     size: float
-    status: str
+    status: TradeStatus | str
     taker_order_id: str
     timestamp: int | None = None
     match_time: int | None = None
@@ -123,13 +123,19 @@ class UserPosition(PrettyPrintBaseModel):
     price: float
     size: float
     volume: float
+    sellable_size: float = 0.0
     token_id: Optional[str] = None
     last_update: float
     market_id: Optional[str] = None
     outcome: Optional[str] = None
     created_at: datetime | None = None
     market_slug: Optional[str] = ""
-    is_failed: bool = False
+    has_failed: bool = False
+    failed_trades: list[TradeMessage] = Field(default_factory=list)
+
+    @property
+    def failed_size(self) -> float | None:
+        return sum([i.size for i in self.failed_trades])
 
 
 class PositionDetails(BaseModel):

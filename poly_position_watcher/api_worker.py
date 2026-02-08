@@ -262,6 +262,18 @@ class HttpFallbackManager:
             if order_ids:
                 self.orders.update(order_ids)
             logger.info(f"Added HTTP monitoring: {len(market_ids or [])} markets, {len(order_ids or [])} orders")
+
+    def set_markets(self, market_ids: list[str] | None = None):
+        """Replace monitored markets with the provided list."""
+        with self._lock:
+            self.markets = set(market_ids or [])
+            logger.info(f"Set HTTP monitoring markets: {len(self.markets)} total")
+
+    def set_orders(self, order_ids: list[str] | None = None):
+        """Replace monitored orders with the provided list."""
+        with self._lock:
+            self.orders = set(order_ids or [])
+            logger.info(f"Set HTTP monitoring orders: {len(self.orders)} total")
     
     def remove(self, market_ids: list[str] = None, order_ids: list[str] = None):
         """Remove markets/orders from monitoring."""

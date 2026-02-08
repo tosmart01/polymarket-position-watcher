@@ -1,18 +1,22 @@
 # poly-position-watcher
 
-English README (default). For Chinese: [README.zh.md](README.zh.md)
+![PyPI](https://img.shields.io/pypi/v/poly-web3)
+![Python](https://img.shields.io/pypi/pyversions/poly-web3)
+![License](https://img.shields.io/github/license/tosmart01/poly-web3)
+
+[English](README.md) | [中文](README.zh.md)
 
 ## Overview
 
-`poly-position-watcher` is a lightweight position and order watcher:
+`poly-position-watcher` focuses on real-time position and order monitoring:
 
-- Track real-time `TRADE` and `ORDER` events via WebSocket
-- Unify HTTP history and WebSocket incremental data into one Pydantic model set
-- Maintain in-memory positions and order states per `token_id`, with blocking read APIs
-- Provide an extensible HTTP polling context as a WebSocket fallback
-- Built-in FIFO position calculator with mark-to-market valuation and PnL
-  
-**Note: The project automatically handles WSS disconnections and reconnections. No manual WebSocket management is required.**
+- WSS real-time tracking for `TRADE` and `ORDER` (positions + orders)
+- HTTP polling fallback for reliability
+- Optional fee calculation (toggle + custom formula)
+- Two sizes exposed: `size` for CLOB matched trades, `sellable_size` for on-chain confirmed trades
+- Failed trades are detected and returned on positions (`has_failed`, `failed_trades`)
+
+**Note: WSS disconnects are auto-detected and reconnected.**
 
 ## Installation
 
@@ -91,16 +95,19 @@ UserPosition(
   price: 0.0,
   size: 0.0,
   volume: 0.0,
+  sellable_size: 0.0,
   token_id: '',
   last_update: 0.0,
   market_id: None,
   outcome: None,
-  created_at: None
+  created_at: None,
+  has_failed: False,
+  failed_trades: []
 )
 ```
 
 
-**Full example (`examples/http_bootstrap_example.py`)**
+**Full example (`examples/example.py`)**
 
 ## Pretty printing
 
@@ -114,20 +121,11 @@ service.show_orders(limit=10)
 ## **⚠️ Fee notice (taker fee / maker rebate)**
 ---
 
-Some Polymarket markets have enabled a taker fee / maker rebate mechanism. The official API returns `feeRateBps` for order placement on those markets, but **historical trade endpoints (e.g. `get_trades`) do not return explicit fee fields or fee deductions**.
+Some Polymarket markets enable taker fee / maker rebate. This library **fully supports fee calculation** and lets you control it:
 
-Therefore:
-
-- By default, this library computes positions based on trade price and size and **does not deduct fee costs**.
-- If you executed **taker trades**, fees may have been charged but will not appear in `get_trades`.
-- Returned positions, cost basis, and unrealized PnL **exclude fees**.
-- In fee-enabled markets, **actual PnL will differ** from this library's results (especially with high-frequency or heavy taker activity).
-
-If you need precise net cost or net PnL:
-- compute fees yourself from CLOB fee-rate or on-chain events,
-- or enable fee calculation via `enable_fee_calc=True` (uses `feeRateBps` from trades/orders),
-- or treat this library as a **pre-fee (fee-excluded)** estimate,
-- and deduct fees based on your strategy/market.
+- Enable with `enable_fee_calc=True` to apply fees using `feeRateBps` from trades/orders
+- Customize with `fee_calc_fn` if you need a different formula
+- Disable (default) if you prefer pre-fee positions
 
 Default fee formula (when `fee_calc_fn` is not provided):
 `fee = 0.25 * (p * (1 - p)) ** 2 * (fee_rate_bps / 1000)`, and `new_size = (1 - fee) * size`.

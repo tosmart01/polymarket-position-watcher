@@ -18,3 +18,13 @@ class MarketEvent(str, Enum):
     PRICE_CHANGE = "price_change"
     TICK_SIZE_CHANGE = "tick_size_change"
     BOOK = "book"
+
+
+class TradeStatus(str, Enum):
+    """Trade status values from Polymarket."""
+
+    MATCHED = "MATCHED"
+    MINED = "MINED"
+    CONFIRMED = "CONFIRMED"
+    RETRYING = "RETRYING"
+    FAILED = "FAILED"

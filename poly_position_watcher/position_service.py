@@ -12,7 +12,7 @@ from queue import Queue, Empty
 from collections import defaultdict
 from typing import Callable, Dict, List
 
-from poly_position_watcher.common.enums import Side
+from poly_position_watcher.common.enums import Side, TradeStatus
 from poly_position_watcher.common.logger import logger
 from poly_position_watcher.api_worker import APIWorker, HttpFallbackManager
 
@@ -26,6 +26,8 @@ from poly_position_watcher.trade_calculator import calculate_position_from_trade
 from rich.console import Console
 from rich.table import Table
 from poly_position_watcher.wss_worker import PolymarketUserWS
+
+FAILED_TRADE = TradeStatus.FAILED
 
 
 class PositionStore:
@@ -85,7 +87,7 @@ class PositionStore:
             outcome, token_id = result
             trades_map = self.trades_by_token[token_id]
             existing = trades_map.get(trade.id)
-            if existing and trade.last_update <= existing.last_update:
+            if existing and trade.last_update < existing.last_update:
                 return
             else:
                 trades_map[trade.id] = trade
@@ -137,25 +139,47 @@ class PositionStore:
     def build_position(
             self, trades: list[TradeMessage], token_id, outcome: str
     ) -> UserPosition | None:
-        is_failed = any(trade.status == "FAILED" for trade in trades)
+        def _status_is(trade: TradeMessage, status: TradeStatus) -> bool:
+            return trade.status == status or trade.status == status.value
+
+        filled_trades = [i for i in trades if _status_is(i, FAILED_TRADE)]
+        success_trades = [i for i in trades if not _status_is(i, FAILED_TRADE)]
+        confirmed_trades = [
+            i for i in success_trades if _status_is(i, TradeStatus.CONFIRMED)
+        ]
+        has_failed = bool(len(filled_trades))
+        if has_failed:
+            filled_size = sum([i.size for i in filled_trades])
+            logger.warning(f"found error trades, total size: {filled_size}: {filled_trades}")
         market_slug = next((trade.market_slug for trade in trades if trade.market_slug), "")
         position_result = calculate_position_from_trades(
-            trades,
+            success_trades,
             user_address=self.user_address,
             enable_fee_calc=self.enable_fee_calc,
             fee_calc_fn=self.fee_calc_fn,
         )
+        sellable_size = 0.0
+        if confirmed_trades:
+            confirmed_result = calculate_position_from_trades(
+                confirmed_trades,
+                user_address=self.user_address,
+                enable_fee_calc=self.enable_fee_calc,
+                fee_calc_fn=self.fee_calc_fn,
+            )
+            sellable_size = confirmed_result.size
         current = UserPosition(
             price=position_result.avg_price,
             size=position_result.size,
             volume=position_result.amount,
+            sellable_size=sellable_size,
             token_id=token_id,
             last_update=position_result.last_update,
             market_id=trades[0].market,
             outcome=outcome,
             created_at=datetime.fromtimestamp(position_result.last_update),
-            is_failed=is_failed,
+            has_failed=has_failed,
             market_slug=market_slug,
+            failed_trades=filled_trades,
         )
         return current
         # if exists_pos := self.positions.get(token_id):
@@ -213,7 +237,7 @@ class PositionWatcherService:
             wss_proxies: dict | None = None,
             init_positions: bool = False,
             enable_http_fallback: bool = False,
-            http_poll_interval: float = 3,
+            http_poll_interval: float = 1.5,
             add_init_positions_to_http: bool = False,
             enable_fee_calc: bool = False,
             fee_calc_fn: Callable[[float, float, float], float] | None = None,
@@ -582,6 +606,28 @@ class PositionWatcherService:
             return
 
         self._http_fallback.remove(market_ids=market_ids, order_ids=order_ids)
+
+    def set_market_http_listen(self, market_ids: list[str] = None):
+        """
+        Replace HTTP fallback market monitoring list.
+
+        :param market_ids: List of market (condition) IDs to monitor
+        """
+        if not self.enable_http_fallback or not self._http_fallback:
+            return
+
+        self._http_fallback.set_markets(market_ids=market_ids)
+
+    def set_order_http_listen(self, order_ids: list[str] = None):
+        """
+        Replace HTTP fallback order monitoring list.
+
+        :param order_ids: List of order IDs to monitor
+        """
+        if not self.enable_http_fallback or not self._http_fallback:
+            return
+
+        self._http_fallback.set_orders(order_ids=order_ids)
 
     def clear_http(self):
         """Clear all HTTP fallback monitoring (threads keep running)."""
