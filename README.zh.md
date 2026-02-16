@@ -7,7 +7,8 @@
 - WSS 实时追踪 `TRADE` 与 `ORDER`（仓位 + 订单）
 - HTTP 轮询兜底，保证可用性
 - 可选手续费计算（开关 + 自定义公式）
-- 提供两个 size：`size` 表示 CLOB 撮合成交，`sellable_size` 表示链上 CONFIRMED 后可卖出部分
+- 用于成交判断的仓位字段：
+  `size`（扣手续费后净仓位）、`original_size`（扣手续费前净仓位）、`sellable_size`（链上 CONFIRMED 可卖出仓位）、`fee_amount`（累计手续费金额）
 - 识别失败交易，并在仓位结果中返回失败交易列表
 
 **说明：WSS 断线会自动检测并重连。**
@@ -46,6 +47,10 @@ with PositionWatcherService(
     order: OrderMessage = service.get_order("<order_id>")
     print(position)
     print(order)
+    if position:
+        print("size(扣费后):", position.size)
+        print("size(扣费前):", position.original_size)
+        print("fee_amount:", position.fee_amount)
     service.show_positions(limit=10)
     service.show_orders(limit=10)
     
@@ -87,7 +92,9 @@ OrderMessage(
 UserPosition(
   price: 0.0,
   size: 0.0,
+  original_size: 0.0,
   volume: 0.0,
+  fee_amount: 0.0,
   sellable_size: 0.0,
   token_id: '',
   last_update: 0.0,
@@ -116,6 +123,8 @@ Polymarket 在部分市场启用 taker fee / maker rebate。本库 **已完整�
 - 通过 `enable_fee_calc=True` 开启，基于 trades/orders 的 `feeRateBps` 计算
 - 通过 `fee_calc_fn` 自定义手续费公式
 - 不开启（默认）则按 pre-fee 方式计算
+- 返回仓位字段语义：
+  `size` = 扣手续费后净仓位，`original_size` = 扣手续费前净仓位，`fee_amount` = 累计手续费金额
 
 默认手续费公式（未传 `fee_calc_fn` 时）：
 `fee = 0.25 * (p * (1 - p)) ** 2 * (fee_rate_bps / 1000)`，`new_size = (1 - fee) * size`。

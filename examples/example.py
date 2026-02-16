@@ -62,6 +62,9 @@ def main() -> None:
         print(order)
         print(position)
         if position:
+            print("size (post-fee):", position.size)
+            print("original_size (pre-fee):", position.original_size)
+            print("fee_amount:", position.fee_amount)
             print("sellable_size:", position.sellable_size)
             if position.has_failed:
                 print("failed_trades:", position.failed_trades)

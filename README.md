@@ -13,7 +13,8 @@
 - WSS real-time tracking for `TRADE` and `ORDER` (positions + orders)
 - HTTP polling fallback for reliability
 - Optional fee calculation (toggle + custom formula)
-- Two sizes exposed: `size` for CLOB matched trades, `sellable_size` for on-chain confirmed trades
+- Position fields for fill checks:
+  `size` (post-fee net size), `original_size` (pre-fee net size), `sellable_size` (on-chain confirmed size), `fee_amount` (accumulated fee amount)
 - Failed trades are detected and returned on positions (`has_failed`, `failed_trades`)
 
 **Note: WSS disconnects are auto-detected and reconnected.**
@@ -52,6 +53,10 @@ with PositionWatcherService(
     order: OrderMessage = service.get_order("<order_id>")
     print(position)
     print(order)
+    if position:
+        print("size(post-fee):", position.size)
+        print("size(pre-fee):", position.original_size)
+        print("fee_amount:", position.fee_amount)
     service.show_positions(limit=10)
     service.show_orders(limit=10)
     
@@ -94,7 +99,9 @@ OrderMessage(
 UserPosition(
   price: 0.0,
   size: 0.0,
+  original_size: 0.0,
   volume: 0.0,
+  fee_amount: 0.0,
   sellable_size: 0.0,
   token_id: '',
   last_update: 0.0,
@@ -126,6 +133,8 @@ Some Polymarket markets enable taker fee / maker rebate. This library **fully su
 - Enable with `enable_fee_calc=True` to apply fees using `feeRateBps` from trades/orders
 - Customize with `fee_calc_fn` if you need a different formula
 - Disable (default) if you prefer pre-fee positions
+- Returned position fields:
+  `size` = post-fee net size, `original_size` = pre-fee net size, `fee_amount` = accumulated fee amount
 
 Default fee formula (when `fee_calc_fn` is not provided):
 `fee = 0.25 * (p * (1 - p)) ** 2 * (fee_rate_bps / 1000)`, and `new_size = (1 - fee) * size`.

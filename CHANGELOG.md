@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.9
+- add `fee_amount` to `PositionResult` and `UserPosition`
+- add `original_size` (pre-fee net size) to `PositionResult` and `UserPosition`
+- keep `size` as post-fee net size when `enable_fee_calc=True`
+
 ## 0.2.8
 - minor cleanup for failed trade size reporting
 

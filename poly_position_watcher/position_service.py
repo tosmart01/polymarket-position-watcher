@@ -170,7 +170,9 @@ class PositionStore:
         current = UserPosition(
             price=position_result.avg_price,
             size=position_result.size,
+            original_size=position_result.original_size,
             volume=position_result.amount,
+            fee_amount=position_result.fee_amount,
             sellable_size=sellable_size,
             token_id=token_id,
             last_update=position_result.last_update,

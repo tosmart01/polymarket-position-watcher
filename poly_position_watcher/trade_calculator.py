@@ -39,18 +39,23 @@ def calculate_position_from_trades(
 
     buy_events = []
     sell_events = []
+    total_original_size = 0.0
 
     def apply_fee(
         size: float, price: float, fee_rate_bps: float, trader_side: str | None
-    ) -> float:
+    ) -> tuple[float, float]:
         if (
             not enable_fee_calc
             or fee_rate_bps <= 0
             or trader_side != "TAKER"
         ):
-            return size
+            return size, 0.0
         calc = fee_calc_fn or _default_fee_calc
-        return calc(size, price, fee_rate_bps)
+        size_after_fee = calc(size, price, fee_rate_bps)
+        fee_amount = (size - size_after_fee) * price
+        return size_after_fee, fee_amount
+
+    total_fee_amount = 0.0
 
     # --- 1. 解析所有交易 ---
     for trade in trades:
@@ -61,24 +66,30 @@ def calculate_position_from_trades(
             if order.maker_address.upper() != user_address.upper():
                 continue
             is_maker_order = True
-            size = apply_fee(
+            size, fee_amount = apply_fee(
                 order.size, order.price, order.fee_rate_bps, trade.trader_side
             )
+            total_fee_amount += fee_amount
 
             if order.side == Side.BUY:
                 buy_events.append((size, order.price, trade.match_time))
+                total_original_size += order.size
             else:
                 sell_events.append((-size, order.price, trade.match_time))
+                total_original_size -= order.size
 
         # taker 部分
         if not is_maker_order and trade.maker_address.upper() == user_address.upper():
-            size = apply_fee(
+            size, fee_amount = apply_fee(
                 trade.size, trade.price, trade.fee_rate_bps, trade.trader_side
             )
+            total_fee_amount += fee_amount
             if trade.side == Side.BUY:
                 buy_events.append((size, trade.price, trade.match_time))
+                total_original_size += trade.size
             else:
                 sell_events.append((-size, trade.price, trade.match_time))
+                total_original_size -= trade.size
 
     # --- 2. 时间排序 ---
     all_events = sorted(buy_events + sell_events, key=lambda x: x[2])
@@ -118,20 +129,25 @@ def calculate_position_from_trades(
 
     # --- 4. 计算最终持仓 ---
     total_size = clean(sum(q[0] for q in buy_queue))
+    original_size = clean(total_original_size)
     cost_basis = clean(sum(clean(q[0]) * q[1] for q in buy_queue))
 
     # 若因误差产生 0.0000003 的 ghost position → 完全清掉
     if abs(total_size) < EPS:
         total_size = 0.0
         cost_basis = 0.0
+    if abs(original_size) < EPS:
+        original_size = 0.0
 
     avg_price = cost_basis / total_size if total_size != 0 else 0.0
 
     return PositionResult(
         size=total_size,
+        original_size=original_size,
         avg_price=avg_price,
         realized_pnl=realized_pnl,
         amount=cost_basis,
+        fee_amount=total_fee_amount,
         is_long=total_size > 0,
         is_short=total_size < 0,
         details=PositionDetails(

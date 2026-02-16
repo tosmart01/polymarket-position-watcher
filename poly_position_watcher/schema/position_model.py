@@ -122,7 +122,9 @@ class OrderMessage(PrettyPrintBaseModel):
 class UserPosition(PrettyPrintBaseModel):
     price: float
     size: float
+    original_size: float = 0.0
     volume: float
+    fee_amount: float = 0.0
     sellable_size: float = 0.0
     token_id: Optional[str] = None
     last_update: float
@@ -150,9 +152,11 @@ class PositionResult(PrettyPrintBaseModel):
     """仓位计算结果"""
 
     size: float
+    original_size: float = 0.0
     avg_price: float
     realized_pnl: float
     amount: float
+    fee_amount: float = 0.0
     position_value: Optional[float] = None
     unrealized_pnl: Optional[float] = None
     total_pnl: Optional[float] = None
