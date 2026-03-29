@@ -12,7 +12,7 @@
 
 - WSS real-time tracking for `TRADE` and `ORDER` (positions + orders)
 - HTTP polling fallback for reliability
-- Optional fee calculation (toggle + custom formula)
+- Optional fee calculation using market `feeSchedule`
 - Position fields for fill checks:
   `size` (post-fee net size), `original_size` (pre-fee net size), `sellable_size` (on-chain confirmed size), `fee_amount` (accumulated fee amount)
 - Failed trades are detected and returned on positions (`has_failed`, `failed_trades`)
@@ -46,8 +46,12 @@ with PositionWatcherService(
     enable_http_fallback=True,  # Enable HTTP polling fallback
     add_init_positions_to_http=True,  # Auto-add condition_ids from init positions to HTTP monitoring
     enable_fee_calc=True,  # Optional: enable fee adjustments
-    # fee_calc_fn=custom_fee_fn,  # Optional: override fee formula
 ) as service:
+    service.set_market_fee_schedule(
+        "<condition_id>",
+        {"rate": 0.0175, "exponent": 1, "takerOnly": True, "rebateRate": 0.25},
+    )
+
     # Non-blocking: Get current positions and orders (returns immediately)
     position: UserPosition = service.get_position("<token_id>")
     order: OrderMessage = service.get_order("<order_id>")
@@ -128,16 +132,20 @@ service.show_orders(limit=10)
 ## **⚠️ Fee notice (taker fee / maker rebate)**
 ---
 
-Some Polymarket markets enable taker fee / maker rebate. This library **fully supports fee calculation** and lets you control it:
+Some Polymarket markets enable taker fee / maker rebate. This library supports fee calculation from market `feeSchedule` data:
 
-- Enable with `enable_fee_calc=True` to apply fees using `feeRateBps` from trades/orders
-- Customize with `fee_calc_fn` if you need a different formula
+- Enable with `enable_fee_calc=True`
+- Register `condition_id -> feeSchedule` through `service.set_market_fee_schedule(...)` or `service.set_market_fee_schedules(...)`
+- Optionally override the fee handler with `fee_calc_fn`
 - Disable (default) if you prefer pre-fee positions
 - Returned position fields:
   `size` = post-fee net size, `original_size` = pre-fee net size, `fee_amount` = accumulated fee amount
 
 Default fee formula (when `fee_calc_fn` is not provided):
-`fee = 0.25 * (p * (1 - p)) ** 2 * (fee_rate_bps / 1000)`, and `new_size = (1 - fee) * size`.
+`fee = size * price * rate * (price * (1 - price)) ** exponent`.
+
+On taker buys, the fee is deducted in shares, so `size` is reduced by `fee / price`.
+On taker sells, the fee is charged in USDC, so position size is unchanged and only `fee_amount` increases.
 
 ---
 
@@ -163,8 +171,9 @@ The HTTP fallback polling threads run persistently throughout the `with` stateme
 | `enable_http_fallback` | bool | False | Enable persistent HTTP polling threads as WebSocket fallback |
 | `http_poll_interval` | float | 3.0 | HTTP polling interval in seconds |
 | `add_init_positions_to_http` | bool | False | Automatically add condition IDs from initialized positions to HTTP monitoring |
-| `enable_fee_calc` | bool | False | Apply fee adjustments using `feeRateBps` from trades/orders |
-| `fee_calc_fn` | callable | None | Custom fee function: `(size, price, fee_rate_bps) -> new_size` |
+| `enable_fee_calc` | bool | False | Apply fee adjustments using registered market `feeSchedule` data |
+| `market_fee_schedules` | mapping | None | Optional initial `condition_id -> feeSchedule` mapping |
+| `fee_calc_fn` | callable | None | Custom fee function: `(size, price, side, fee_schedule) -> (new_size, fee_amount)` |
 
 ### Environment Variables
 

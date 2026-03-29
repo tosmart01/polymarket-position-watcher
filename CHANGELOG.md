@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+- switch fee calculation to use per-market `feeSchedule` instead of `feeRateBps`
+- expose `set_market_fee_schedule` and `set_market_fee_schedules` on `PositionWatcherService`
+- apply taker buy fees in shares and taker sell fees in USDC
+- add fee-focused trade calculator tests for taker and maker scenarios
+
 ## 0.2.9
 - add `fee_amount` to `PositionResult` and `UserPosition`
 - add `original_size` (pre-fee net size) to `PositionResult` and `UserPosition`

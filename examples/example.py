@@ -1,4 +1,5 @@
 """Minimal example for bootstrapping existing orders/positions."""
+
 from __future__ import annotations
 
 import os
@@ -27,19 +28,18 @@ def main() -> None:
 
     market_ids = ["0xca595a16069e6cd9bce150ecd5cec487b848d9040412547c88e87553af24f620"]
     order_ids = ["0xa58ffaf62f6b78c9dcdcf6a3fb7537e216b49c997..."]
-    token_id = "45011460110592496504859016909655199515278476710837825147676454435935473238039"
+    token_id = (
+        "45011460110592496504859016909655199515278476710837825147676454435935473238039"
+    )
     wss_proxy = {
         "http_proxy_host": "127.0.0.1",
         "http_proxy_port": 8118,
         "proxy_type": "http",
     }
 
-    def fee_calc(size: float, price: float, fee_rate_bps: float) -> float:
-        fee = 0.25 * (price * (1 - price)) ** 2 * (fee_rate_bps / 1000)
-        return (1 - fee) * size
-
     # 单一 with 语句：初始化仓位并通过 HTTP 兜底监控
-    with PositionWatcherService(
+    with (
+        PositionWatcherService(
             client=client,
             wss_proxies=wss_proxy,
             init_positions=True,  # 通过官方 API 初始化现有仓位
@@ -47,8 +47,18 @@ def main() -> None:
             http_poll_interval=1.5,  # HTTP 轮询间隔（秒）
             add_init_positions_to_http=True,  # 将初始化仓位得到的 condition_id 加入 HTTP 监控
             enable_fee_calc=True,  # 是否启用手续费计算
-            fee_calc_fn=fee_calc,  # 自定义手续费函数（可选）
-    ) as service:
+        ) as service
+    ):
+        service.set_market_fee_schedule(
+            market_ids[0],
+            {
+                "rate": 0.0175,
+                "exponent": 1,
+                "takerOnly": True,
+                "rebateRate": 0.25,
+            },
+        )
+
         # 非阻塞获取
         position = service.get_position(token_id)
         order = service.get_order(order_ids[0])

@@ -5,7 +5,7 @@
 # @File: trade_calculator.py
 # @Software: PyCharm
 from collections import deque
-from typing import Callable, List
+from typing import Any, Callable, List, Mapping
 
 from poly_position_watcher.common.enums import Side
 from poly_position_watcher.schema.position_model import (
@@ -15,17 +15,41 @@ from poly_position_watcher.schema.position_model import (
 )
 
 
-def _default_fee_calc(size: float, price: float, fee_rate_bps: float) -> float:
-    fee_multiplier = fee_rate_bps / 1000 if fee_rate_bps else 0.0
-    fee = 0.25 * (price * (1 - price)) ** 2 * fee_multiplier
-    return (1 - fee) * size
+def _default_fee_calc(
+    size: float,
+    price: float,
+    side: Side | str,
+    fee_schedule: Mapping[str, Any],
+) -> tuple[float, float]:
+    rate = float(fee_schedule.get("rate") or 0.0)
+    exponent = float(fee_schedule.get("exponent") or 0.0)
+    if size <= 0 or price <= 0 or rate <= 0:
+        return size, 0.0
+
+    fee_amount = round(
+        max(size * price * rate * ((price * (1 - price)) ** exponent), 0.0),
+        4,
+    )
+    if fee_amount <= 0:
+        return size, 0.0
+
+    if side == Side.BUY or side == Side.BUY.value:
+        fee_size = fee_amount / price
+        return max(size - fee_size, 0.0), fee_amount
+
+    return size, fee_amount
 
 
 def calculate_position_from_trades(
     trades: List[TradeMessage],
     user_address: str,
     enable_fee_calc: bool = False,
-    fee_calc_fn: Callable[[float, float, float], float] | None = None,
+    fee_schedule_by_market: Mapping[str, Mapping[str, Any]] | None = None,
+    fee_calc_fn: Callable[
+        [float, float, Side | str, Mapping[str, Any]],
+        tuple[float, float],
+    ]
+    | None = None,
 ) -> PositionResult:
     """
     根据交易记录直接计算用户仓位（带浮点误差修正）
@@ -42,18 +66,24 @@ def calculate_position_from_trades(
     total_original_size = 0.0
 
     def apply_fee(
-        size: float, price: float, fee_rate_bps: float, trader_side: str | None
+        size: float,
+        price: float,
+        side: Side | str,
+        market_id: str | None,
+        trader_side: str | None,
     ) -> tuple[float, float]:
-        if (
-            not enable_fee_calc
-            or fee_rate_bps <= 0
-            or trader_side != "TAKER"
-        ):
+        fee_schedule = (
+            fee_schedule_by_market.get(market_id or "")
+            if fee_schedule_by_market
+            else None
+        )
+        if not enable_fee_calc or not fee_schedule:
+            return size, 0.0
+        taker_only = bool(fee_schedule.get("takerOnly", False))
+        if taker_only and trader_side != "TAKER":
             return size, 0.0
         calc = fee_calc_fn or _default_fee_calc
-        size_after_fee = calc(size, price, fee_rate_bps)
-        fee_amount = (size - size_after_fee) * price
-        return size_after_fee, fee_amount
+        return calc(size, price, side, fee_schedule)
 
     total_fee_amount = 0.0
 
@@ -67,28 +97,54 @@ def calculate_position_from_trades(
                 continue
             is_maker_order = True
             size, fee_amount = apply_fee(
-                order.size, order.price, order.fee_rate_bps, trade.trader_side
+                order.size,
+                order.price,
+                order.side,
+                trade.market,
+                trade.trader_side,
             )
             total_fee_amount += fee_amount
 
             if order.side == Side.BUY:
-                buy_events.append((size, order.price, trade.match_time))
+                buy_events.append(
+                    (size, order.price, trade.match_time, order.size * order.price)
+                )
                 total_original_size += order.size
             else:
-                sell_events.append((-size, order.price, trade.match_time))
+                sell_events.append(
+                    (
+                        -size,
+                        order.price,
+                        trade.match_time,
+                        size * order.price - fee_amount,
+                    )
+                )
                 total_original_size -= order.size
 
         # taker 部分
         if not is_maker_order and trade.maker_address.upper() == user_address.upper():
             size, fee_amount = apply_fee(
-                trade.size, trade.price, trade.fee_rate_bps, trade.trader_side
+                trade.size,
+                trade.price,
+                trade.side,
+                trade.market,
+                trade.trader_side,
             )
             total_fee_amount += fee_amount
             if trade.side == Side.BUY:
-                buy_events.append((size, trade.price, trade.match_time))
+                buy_events.append(
+                    (size, trade.price, trade.match_time, trade.size * trade.price)
+                )
                 total_original_size += trade.size
             else:
-                sell_events.append((-size, trade.price, trade.match_time))
+                sell_events.append(
+                    (
+                        -size,
+                        trade.price,
+                        trade.match_time,
+                        size * trade.price - fee_amount,
+                    )
+                )
                 total_original_size -= trade.size
 
     # --- 2. 时间排序 ---
@@ -98,34 +154,36 @@ def calculate_position_from_trades(
     buy_queue = deque()
     realized_pnl = 0.0
 
-    for size, price, _ in all_events:
+    for size, price, _, cash_amount in all_events:
         size = clean(size)  # ← 新增：修正
 
         if size > 0:
             # 买入加入队列
-            buy_queue.append([size, price])
+            unit_cost = cash_amount / size if size else price
+            buy_queue.append([size, unit_cost])
 
         else:
             # 卖出（size 为负）
             sell_size = clean(-size)
+            sell_price = cash_amount / sell_size if sell_size else price
 
             while sell_size > EPS and buy_queue:
                 lot_size, lot_price = buy_queue[0]
 
                 if lot_size <= sell_size + EPS:
                     # 完全消耗
-                    realized_pnl += (price - lot_price) * lot_size
+                    realized_pnl += (sell_price - lot_price) * lot_size
                     sell_size -= lot_size
                     buy_queue.popleft()
                 else:
                     # 部分消耗
-                    realized_pnl += (price - lot_price) * sell_size
+                    realized_pnl += (sell_price - lot_price) * sell_size
                     buy_queue[0][0] = clean(lot_size - sell_size)
                     sell_size = 0.0
 
             # 如果还有卖不完 → 变成空头
             if sell_size > EPS:
-                buy_queue.appendleft([-sell_size, price])
+                buy_queue.appendleft([-sell_size, sell_price])
 
     # --- 4. 计算最终持仓 ---
     total_size = clean(sum(q[0] for q in buy_queue))

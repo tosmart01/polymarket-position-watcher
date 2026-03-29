@@ -10,7 +10,7 @@ import threading
 from datetime import datetime
 from queue import Queue, Empty
 from collections import defaultdict
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List, Mapping
 
 from poly_position_watcher.common.enums import Side, TradeStatus
 from poly_position_watcher.common.logger import logger
@@ -36,14 +36,23 @@ class PositionStore:
     """
 
     def __init__(
-            self,
-            user_address: str,
-            enable_fee_calc: bool = False,
-            fee_calc_fn: Callable[[float, float, float], float] | None = None,
+        self,
+        user_address: str,
+        enable_fee_calc: bool = False,
+        market_fee_schedules: Mapping[str, Mapping[str, Any]] | None = None,
+        fee_calc_fn: Callable[
+            [float, float, Side | str, Mapping[str, Any]], tuple[float, float]
+        ]
+        | None = None,
     ):
         self.user_address = user_address
         self.enable_fee_calc = enable_fee_calc
         self.fee_calc_fn = fee_calc_fn
+        self.market_fee_schedules: Dict[str, dict[str, Any]] = {
+            condition_id: dict(fee_schedule)
+            for condition_id, fee_schedule in (market_fee_schedules or {}).items()
+            if fee_schedule
+        }
         self.trades_by_token: Dict[str, Dict[str, TradeMessage]] = defaultdict(dict)
         self.positions: Dict[str, UserPosition] = {}
         self.orders: Dict[str, OrderMessage] = {}
@@ -126,9 +135,9 @@ class PositionStore:
         with self._lock:
             existing = self.orders.get(order.id)
             if (
-                    existing
-                    and order.size_matched <= existing.size_matched
-                    and order.status == existing.status
+                existing
+                and order.size_matched <= existing.size_matched
+                and order.status == existing.status
             ):
                 return
             if abs(order.size_matched - order.original_size) < 0.5:
@@ -136,8 +145,52 @@ class PositionStore:
             self.orders[order.id] = order
             self._put(order.id, order)
 
+    def set_market_fee_schedule(
+        self, condition_id: str, fee_schedule: Mapping[str, Any] | None
+    ) -> None:
+        with self._lock:
+            if fee_schedule:
+                self.market_fee_schedules[condition_id] = dict(fee_schedule)
+            else:
+                self.market_fee_schedules.pop(condition_id, None)
+            self._rebuild_positions_for_market(condition_id)
+
+    def set_market_fee_schedules(
+        self, fee_schedule_map: Mapping[str, Mapping[str, Any] | None]
+    ) -> None:
+        with self._lock:
+            affected_markets: set[str] = set()
+            for condition_id, fee_schedule in fee_schedule_map.items():
+                affected_markets.add(condition_id)
+                if fee_schedule:
+                    self.market_fee_schedules[condition_id] = dict(fee_schedule)
+                else:
+                    self.market_fee_schedules.pop(condition_id, None)
+
+            for condition_id in affected_markets:
+                self._rebuild_positions_for_market(condition_id)
+
+    def _rebuild_positions_for_market(self, condition_id: str) -> None:
+        for token_id, trades_map in self.trades_by_token.items():
+            trades = list(trades_map.values())
+            if not trades or not any(trade.market == condition_id for trade in trades):
+                continue
+
+            result = self.get_token_id_from_trade(trades[0])
+            if result is None:
+                continue
+
+            outcome, _ = result
+            user_pos = self.build_position(
+                trades=trades, token_id=token_id, outcome=outcome
+            )
+            if user_pos is None:
+                continue
+            self.positions[token_id] = user_pos
+            self._put(token_id, user_pos)
+
     def build_position(
-            self, trades: list[TradeMessage], token_id, outcome: str
+        self, trades: list[TradeMessage], token_id, outcome: str
     ) -> UserPosition | None:
         def _status_is(trade: TradeMessage, status: TradeStatus) -> bool:
             return trade.status == status or trade.status == status.value
@@ -150,12 +203,17 @@ class PositionStore:
         has_failed = bool(len(filled_trades))
         if has_failed:
             filled_size = sum([i.size for i in filled_trades])
-            logger.warning(f"found error trades, total size: {filled_size}: {filled_trades}")
-        market_slug = next((trade.market_slug for trade in trades if trade.market_slug), "")
+            logger.warning(
+                f"found error trades, total size: {filled_size}: {filled_trades}"
+            )
+        market_slug = next(
+            (trade.market_slug for trade in trades if trade.market_slug), ""
+        )
         position_result = calculate_position_from_trades(
             success_trades,
             user_address=self.user_address,
             enable_fee_calc=self.enable_fee_calc,
+            fee_schedule_by_market=self.market_fee_schedules,
             fee_calc_fn=self.fee_calc_fn,
         )
         sellable_size = 0.0
@@ -164,6 +222,7 @@ class PositionStore:
                 confirmed_trades,
                 user_address=self.user_address,
                 enable_fee_calc=self.enable_fee_calc,
+                fee_schedule_by_market=self.market_fee_schedules,
                 fee_calc_fn=self.fee_calc_fn,
             )
             sellable_size = confirmed_result.size
@@ -204,12 +263,12 @@ class PositionStore:
         return self.orders.get(order_id)
 
     def blocking_get_token_position(
-            self, token_id: str, timeout: float = None
+        self, token_id: str, timeout: float = None
     ) -> UserPosition:
         return self._get(token_id, timeout)
 
     def blocking_get_order_by_id(
-            self, order_id: str, timeout: float = None
+        self, order_id: str, timeout: float = None
     ) -> OrderMessage:
         return self._get(order_id, timeout)
 
@@ -233,16 +292,20 @@ class PositionWatcherService:
     """
 
     def __init__(
-            self,
-            client,
-            ws_idle_timeout=60 * 60,
-            wss_proxies: dict | None = None,
-            init_positions: bool = False,
-            enable_http_fallback: bool = False,
-            http_poll_interval: float = 1.5,
-            add_init_positions_to_http: bool = False,
-            enable_fee_calc: bool = False,
-            fee_calc_fn: Callable[[float, float, float], float] | None = None,
+        self,
+        client,
+        ws_idle_timeout=60 * 60,
+        wss_proxies: dict | None = None,
+        init_positions: bool = False,
+        enable_http_fallback: bool = False,
+        http_poll_interval: float = 1.5,
+        add_init_positions_to_http: bool = False,
+        enable_fee_calc: bool = False,
+        market_fee_schedules: Mapping[str, Mapping[str, Any]] | None = None,
+        fee_calc_fn: Callable[
+            [float, float, Side | str, Mapping[str, Any]], tuple[float, float]
+        ]
+        | None = None,
     ):
         """
         :param client: ClobClient instance
@@ -253,8 +316,9 @@ class PositionWatcherService:
         :param http_poll_interval: HTTP polling interval in seconds
         :param add_init_positions_to_http: Whether to add condition_ids from init_positions to HTTP monitoring
         :param enable_fee_calc: Whether to apply fee adjustments in position calc
-        :param fee_calc_fn: Optional custom fee function (size, price, fee_rate_bps) -> new_size
-        
+        :param market_fee_schedules: Optional mapping of condition_id -> feeSchedule
+        :param fee_calc_fn: Optional custom fee function (size, price, side, fee_schedule) -> (new_size, fee_amount)
+
         wss_proxies example: {
             "http_proxy_host": "127.0.0.1",
             "http_proxy_port": 8118,
@@ -266,6 +330,7 @@ class PositionWatcherService:
         self.position_store = PositionStore(
             self.user_address,
             enable_fee_calc=enable_fee_calc,
+            market_fee_schedules=market_fee_schedules,
             fee_calc_fn=fee_calc_fn,
         )
         self._wss_proxies = wss_proxies or {}
@@ -305,15 +370,19 @@ class PositionWatcherService:
         init_condition_ids = []
         if self.init_positions:
             try:
-                initialize_trades = self.api_worker.fetch_trades_from_positions(self.user_address)
+                initialize_trades = self.api_worker.fetch_trades_from_positions(
+                    self.user_address
+                )
                 if initialize_trades:
                     for token_id, trades in initialize_trades.items():
                         self.position_store.init_trades(trades)
-                    positions_info = '\n'.join([
-                        f"slug={pos.market_slug}, price={pos.price}, size={pos.size:.4f},"
-                        f"volume={pos.volume:.4f}, token_id={pos.token_id}, outcome={pos.outcome}"
-                        for pos in self.position_store.positions.values()
-                    ])
+                    positions_info = "\n".join(
+                        [
+                            f"slug={pos.market_slug}, price={pos.price}, size={pos.size:.4f},"
+                            f"volume={pos.volume:.4f}, token_id={pos.token_id}, outcome={pos.outcome}"
+                            for pos in self.position_store.positions.values()
+                        ]
+                    )
                     logger.info(f"Initialized positions:\n{positions_info}")
             except Exception as e:
                 logger.error(f"Failed to initialize positions: {e}")
@@ -328,7 +397,9 @@ class PositionWatcherService:
             # Add init positions' condition_ids to HTTP monitoring if requested
             if self.add_init_positions_to_http and init_condition_ids:
                 self._http_fallback.add(market_ids=init_condition_ids)
-                logger.info(f"Added {len(init_condition_ids)} condition_ids from init_positions to HTTP monitoring")
+                logger.info(
+                    f"Added {len(init_condition_ids)} condition_ids from init_positions to HTTP monitoring"
+                )
 
         return self
 
@@ -393,6 +464,16 @@ class PositionWatcherService:
             return position
         return UserPosition(token_id=token_id, price=0, size=0, volume=0, last_update=0)
 
+    def set_market_fee_schedule(
+        self, condition_id: str, fee_schedule: Mapping[str, Any] | None
+    ) -> None:
+        self.position_store.set_market_fee_schedule(condition_id, fee_schedule)
+
+    def set_market_fee_schedules(
+        self, fee_schedule_map: Mapping[str, Mapping[str, Any] | None]
+    ) -> None:
+        self.position_store.set_market_fee_schedules(fee_schedule_map)
+
     @staticmethod
     def _truncate(value: str, limit: int) -> str:
         if len(value) <= limit:
@@ -402,9 +483,7 @@ class PositionWatcherService:
         tail = keep - head
         return f"{value[:head]}...{value[-tail:]}" if keep else "..."
 
-    def show_positions(
-            self, limit: int | None = None, max_width: int = 24
-    ) -> str:
+    def show_positions(self, limit: int | None = None, max_width: int = 24) -> str:
         """
         Pretty print current positions and return the rendered table.
         """
@@ -423,20 +502,30 @@ class PositionWatcherService:
                 if pos.last_update
                 else ""
             )
-            rows.append({
-                "slug": pos.market_slug or "",
-                "outcome": pos.outcome or "",
-                "token_id": pos.token_id or "",
-                "price": f"{pos.price:.3f}",
-                "size": f"{pos.size:.3f}",
-                "volume": f"{pos.volume:.4f}",
-                "updated_at": last_update,
-            })
+            rows.append(
+                {
+                    "slug": pos.market_slug or "",
+                    "outcome": pos.outcome or "",
+                    "token_id": pos.token_id or "",
+                    "price": f"{pos.price:.3f}",
+                    "size": f"{pos.size:.3f}",
+                    "volume": f"{pos.volume:.4f}",
+                    "updated_at": last_update,
+                }
+            )
 
         rows.sort(key=lambda r: abs(float(r["volume"])), reverse=True)
         if limit:
             rows = rows[:limit]
-        headers = ["slug", "outcome", "token_id", "price", "size", "volume", "updated_at"]
+        headers = [
+            "slug",
+            "outcome",
+            "token_id",
+            "price",
+            "size",
+            "volume",
+            "updated_at",
+        ]
         table = Table(title="Positions", show_lines=False, show_footer=True)
         table.add_column("slug", style="cyan")
         table.add_column("outcome", style="magenta")
@@ -473,9 +562,7 @@ class PositionWatcherService:
         record_console.print(table)
         return record_console.export_text()
 
-    def show_orders(
-            self, limit: int | None = None, max_width: int = 24
-    ) -> str:
+    def show_orders(self, limit: int | None = None, max_width: int = 24) -> str:
         """
         Pretty print current orders and return the rendered table.
         """
@@ -496,17 +583,19 @@ class PositionWatcherService:
                 if order.timestamp
                 else ""
             )
-            rows.append({
-                "slug": order.market_slug or "",
-                "outcome": order.outcome or "",
-                "order_id": order.id or "",
-                "side": order.side or "",
-                "price": f"{order.price:.3f}",
-                "size_matched": f"{order.size_matched:.4f}",
-                "original_size": f"{order.original_size or 0.0:.4f}",
-                "status": order.status or "",
-                "created_at": created_at,
-            })
+            rows.append(
+                {
+                    "slug": order.market_slug or "",
+                    "outcome": order.outcome or "",
+                    "order_id": order.id or "",
+                    "side": order.side or "",
+                    "price": f"{order.price:.3f}",
+                    "size_matched": f"{order.size_matched:.4f}",
+                    "original_size": f"{order.original_size or 0.0:.4f}",
+                    "status": order.status or "",
+                    "created_at": created_at,
+                }
+            )
         rows.sort(key=lambda r: abs(float(r["size_matched"])), reverse=True)
         if limit:
             rows = rows[:limit]
@@ -558,7 +647,7 @@ class PositionWatcherService:
         return self.position_store.get_order_by_id(order_id)
 
     def blocking_get_position(
-            self, token_id: str, timeout: float = None
+        self, token_id: str, timeout: float = None
     ) -> UserPosition | None:
         """
         超时返回None；若无仓位则返回 size=0 的占位 UserPosition
@@ -570,7 +659,7 @@ class PositionWatcherService:
             return self.get_position(token_id)
 
     def blocking_get_order(
-            self, order_id: str, timeout: float = None
+        self, order_id: str, timeout: float = None
     ) -> OrderMessage | None:
         """
         超时返回None（即返回 None，表示没有订单更新）
@@ -584,23 +673,29 @@ class PositionWatcherService:
     # -------------------------------------------------------------------------
     # HTTP Fallback Management (delegates to HttpFallbackManager)
     # -------------------------------------------------------------------------
-    def add_http_listen(self, order_ids: list[str] = None, market_ids: list[str] = None):
+    def add_http_listen(
+        self, order_ids: list[str] = None, market_ids: list[str] = None
+    ):
         """
         Add markets/orders to HTTP fallback polling.
-        
+
         :param order_ids: List of order IDs to monitor
         :param market_ids: List of market (condition) IDs to monitor
         """
         if not self.enable_http_fallback or not self._http_fallback:
-            logger.warning("HTTP fallback is not enabled. Enable it in __init__ to use this method.")
+            logger.warning(
+                "HTTP fallback is not enabled. Enable it in __init__ to use this method."
+            )
             return
 
         self._http_fallback.add(market_ids=market_ids, order_ids=order_ids)
 
-    def remove_http_listen(self, order_ids: list[str] = None, market_ids: list[str] = None):
+    def remove_http_listen(
+        self, order_ids: list[str] = None, market_ids: list[str] = None
+    ):
         """
         Remove markets/orders from HTTP fallback polling.
-        
+
         :param order_ids: List of order IDs to remove
         :param market_ids: List of market (condition) IDs to remove
         """
