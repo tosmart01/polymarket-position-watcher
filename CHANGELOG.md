@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+- log a warning once per market when fee calculation is enabled but `feeSchedule` has not been registered
+- document more clearly that callers must provide market fee metadata for fee-aware positions
+
 ## 0.3.0
 - switch fee calculation to use per-market `feeSchedule` instead of `feeRateBps`
 - expose `set_market_fee_schedule` and `set_market_fee_schedules` on `PositionWatcherService`

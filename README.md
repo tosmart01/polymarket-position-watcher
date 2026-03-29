@@ -76,6 +76,11 @@ with PositionWatcherService(
     # service.clear_http()  # Clear all monitoring items, threads continue running
 ```
 
+Important:
+- When `enable_fee_calc=True`, you must register market fee metadata with `set_market_fee_schedule(...)` or `set_market_fee_schedules(...)`.
+- `get_position()` does not fetch `/markets` automatically.
+- If a market is missing `feeSchedule`, fee calculation is skipped for that market and a warning is logged once.
+
 
 
 Example output:
@@ -136,6 +141,7 @@ Some Polymarket markets enable taker fee / maker rebate. This library supports f
 
 - Enable with `enable_fee_calc=True`
 - Register `condition_id -> feeSchedule` through `service.set_market_fee_schedule(...)` or `service.set_market_fee_schedules(...)`
+- This registration step is required if you want fee-aware positions; the watcher does not auto-fetch `/markets`
 - Optionally override the fee handler with `fee_calc_fn`
 - Disable (default) if you prefer pre-fee positions
 - Returned position fields:

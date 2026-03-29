@@ -8,11 +8,14 @@ from collections import deque
 from typing import Any, Callable, List, Mapping
 
 from poly_position_watcher.common.enums import Side
+from poly_position_watcher.common.logger import logger
 from poly_position_watcher.schema.position_model import (
     PositionResult,
     PositionDetails,
     TradeMessage,
 )
+
+_MISSING_FEE_SCHEDULE_WARNED_MARKETS: set[str] = set()
 
 
 def _default_fee_calc(
@@ -78,6 +81,12 @@ def calculate_position_from_trades(
             else None
         )
         if not enable_fee_calc or not fee_schedule:
+            if enable_fee_calc and market_id and market_id not in _MISSING_FEE_SCHEDULE_WARNED_MARKETS:
+                logger.warning(
+                    "Fee calculation enabled but feeSchedule is missing for market {}; fee is skipped until it is registered.",
+                    market_id,
+                )
+                _MISSING_FEE_SCHEDULE_WARNED_MARKETS.add(market_id)
             return size, 0.0
         taker_only = bool(fee_schedule.get("takerOnly", False))
         if taker_only and trader_side != "TAKER":
