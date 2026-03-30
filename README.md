@@ -81,6 +81,50 @@ Important:
 - `get_position()` does not fetch `/markets` automatically.
 - If a market is missing `feeSchedule`, fee calculation is skipped for that market and a warning is logged once.
 
+Where does `feeSchedule` come from:
+- Fetch a market or event from the Gamma API, then read the market object's `feeSchedule`.
+- Your trade payload uses `trade.market` as the market `conditionId`, so register fee metadata with `conditionId` as the key.
+- Official docs:
+  [Fees](https://docs.polymarket.com/trading/fees),
+  [Get event by id](https://docs.polymarket.com/api-reference/events/get-event-by-id),
+  [List markets](https://docs.polymarket.com/api-reference/markets/list-markets),
+  [Get market by slug](https://docs.polymarket.com/api-reference/markets/get-market-by-slug)
+
+Example: fetch an event and register all nested market fee schedules
+
+```python
+import requests
+
+event = requests.get(
+    "https://gamma-api.polymarket.com/events/<event_id>",
+    timeout=10,
+).json()
+
+fee_schedule_map = {
+    market["conditionId"]: market.get("feeSchedule")
+    for market in event.get("markets", [])
+    if market.get("feeSchedule")
+}
+
+service.set_market_fee_schedules(fee_schedule_map)
+```
+
+Example: fetch a single market and register its fee schedule
+
+```python
+import requests
+
+market = requests.get(
+    "https://gamma-api.polymarket.com/markets/slug/<market-slug>",
+    timeout=10,
+).json()
+
+service.set_market_fee_schedule(
+    market["conditionId"],
+    market.get("feeSchedule"),
+)
+```
+
 
 
 Example output:
@@ -142,6 +186,7 @@ Some Polymarket markets enable taker fee / maker rebate. This library supports f
 - Enable with `enable_fee_calc=True`
 - Register `condition_id -> feeSchedule` through `service.set_market_fee_schedule(...)` or `service.set_market_fee_schedules(...)`
 - This registration step is required if you want fee-aware positions; the watcher does not auto-fetch `/markets`
+- In practice, use the Gamma market/event response's `market.get("feeSchedule")`
 - Optionally override the fee handler with `fee_calc_fn`
 - Disable (default) if you prefer pre-fee positions
 - Returned position fields:
