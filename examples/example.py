@@ -77,7 +77,7 @@ def main() -> None:
             print("fee_amount:", position.fee_amount)
             print("sellable_size:", position.sellable_size)
             if position.has_failed:
-                print("failed_trades:", position.failed_trades)
+                print("failed_trade_ids:", position.failed_trade_ids)
         service.show_positions(limit=10)
         service.show_orders(limit=10)
 

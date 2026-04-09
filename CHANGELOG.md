@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+- update the default Polymarket fee formula to `size * rate * price * (1 - price)`
+- reduce failed trade logging and display output to trade ids only
+
 ## 0.3.1
 - log a warning once per market when fee calculation is enabled but `feeSchedule` has not been registered
 - document more clearly that callers must provide market fee metadata for fee-aware positions

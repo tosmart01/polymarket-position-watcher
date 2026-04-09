@@ -195,16 +195,19 @@ class PositionStore:
         def _status_is(trade: TradeMessage, status: TradeStatus) -> bool:
             return trade.status == status or trade.status == status.value
 
-        filled_trades = [i for i in trades if _status_is(i, FAILED_TRADE)]
+        failed_trades = [i for i in trades if _status_is(i, FAILED_TRADE)]
         success_trades = [i for i in trades if not _status_is(i, FAILED_TRADE)]
         confirmed_trades = [
             i for i in success_trades if _status_is(i, TradeStatus.CONFIRMED)
         ]
-        has_failed = bool(len(filled_trades))
+        has_failed = bool(len(failed_trades))
         if has_failed:
-            filled_size = sum([i.size for i in filled_trades])
+            failed_size = sum(i.size for i in failed_trades)
+            failed_trade_ids = [trade.id for trade in failed_trades]
             logger.warning(
-                f"found error trades, total size: {filled_size}: {filled_trades}"
+                "Found failed trades, total size: {}, ids: {}",
+                failed_size,
+                failed_trade_ids,
             )
         market_slug = next(
             (trade.market_slug for trade in trades if trade.market_slug), ""
@@ -240,7 +243,7 @@ class PositionStore:
             created_at=datetime.fromtimestamp(position_result.last_update),
             has_failed=has_failed,
             market_slug=market_slug,
-            failed_trades=filled_trades,
+            failed_trades=failed_trades,
         )
         return current
         # if exists_pos := self.positions.get(token_id):

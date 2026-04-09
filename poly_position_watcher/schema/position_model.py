@@ -139,6 +139,20 @@ class UserPosition(PrettyPrintBaseModel):
     def failed_size(self) -> float:
         return sum(i.size for i in self.failed_trades)
 
+    @property
+    def failed_trade_ids(self) -> list[str]:
+        return [trade.id for trade in self.failed_trades]
+
+    def __str__(self):
+        lines = []
+        for name, value in self.__dict__.items():
+            if name == "failed_trades":
+                value = self.failed_trade_ids
+            lines.append(f"{name}: {value!r}")
+        return f"{self.__class__.__name__}(\n  " + ",\n  ".join(lines) + "\n)"
+
+    __repr__ = __str__
+
 
 class PositionDetails(BaseModel):
     """仓位详细信息"""

@@ -25,18 +25,15 @@ def _default_fee_calc(
     fee_schedule: Mapping[str, Any],
 ) -> tuple[float, float]:
     rate = float(fee_schedule.get("rate") or 0.0)
-    exponent = float(fee_schedule.get("exponent") or 0.0)
     if size <= 0 or price <= 0 or rate <= 0:
         return size, 0.0
 
-    fee_amount = round(
-        max(size * price * rate * ((price * (1 - price)) ** exponent), 0.0),
-        4,
-    )
+    fee_amount = round(max(size * rate * price * (1 - price), 0.0), 5)
     if fee_amount <= 0:
         return size, 0.0
 
-    if side == Side.BUY or side == Side.BUY.value:
+    side_value = getattr(side, "value", side)
+    if str(side_value).upper() == "BUY":
         fee_size = fee_amount / price
         return max(size - fee_size, 0.0), fee_amount
 

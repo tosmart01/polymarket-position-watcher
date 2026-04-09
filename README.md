@@ -193,7 +193,7 @@ Some Polymarket markets enable taker fee / maker rebate. This library supports f
   `size` = post-fee net size, `original_size` = pre-fee net size, `fee_amount` = accumulated fee amount
 
 Default fee formula (when `fee_calc_fn` is not provided):
-`fee = size * price * rate * (price * (1 - price)) ** exponent`.
+`fee = size * rate * price * (1 - price)`.
 
 On taker buys, the fee is deducted in shares, so `size` is reduced by `fee / price`.
 On taker sells, the fee is charged in USDC, so position size is unchanged and only `fee_amount` increases.

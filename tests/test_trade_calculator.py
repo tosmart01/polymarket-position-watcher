@@ -53,8 +53,8 @@ def build_taker_trade(
     )
 
 
-def expected_fee(size: float, price: float, rate: float, exponent: float) -> float:
-    return round(size * price * rate * ((price * (1 - price)) ** exponent), 4)
+def expected_fee(size: float, price: float, rate: float) -> float:
+    return round(size * rate * price * (1 - price), 5)
 
 
 class TradeCalculatorFeeTests(unittest.TestCase):
@@ -139,7 +139,7 @@ class TradeCalculatorFeeTests(unittest.TestCase):
             fee_schedule_by_market={MARKET_ID: FEE_SCHEDULE},
         )
 
-        fee_amount = expected_fee(100.0, 0.25, 0.0175, 1)
+        fee_amount = expected_fee(100.0, 0.25, 0.0175)
         expected_size = 100.0 - fee_amount / 0.25
 
         self.assertTrue(math.isclose(result.fee_amount, fee_amount, rel_tol=0, abs_tol=1e-9))
@@ -166,7 +166,7 @@ class TradeCalculatorFeeTests(unittest.TestCase):
             fee_schedule_by_market={MARKET_ID: FEE_SCHEDULE},
         )
 
-        fee_amount = expected_fee(100.0, 0.25, 0.0175, 1)
+        fee_amount = expected_fee(100.0, 0.25, 0.0175)
         net_proceeds = 100.0 * 0.25 - fee_amount
 
         self.assertTrue(math.isclose(result.fee_amount, fee_amount, rel_tol=0, abs_tol=1e-9))
@@ -183,7 +183,7 @@ class TradeCalculatorFeeTests(unittest.TestCase):
             price=0.25,
             match_time=1,
         )
-        buy_fee = expected_fee(100.0, 0.25, 0.0175, 1)
+        buy_fee = expected_fee(100.0, 0.25, 0.0175)
         net_buy_size = 100.0 - buy_fee / 0.25
 
         sell_trade = build_taker_trade(
@@ -201,7 +201,7 @@ class TradeCalculatorFeeTests(unittest.TestCase):
             fee_schedule_by_market={MARKET_ID: FEE_SCHEDULE},
         )
 
-        sell_fee = expected_fee(net_buy_size, 0.4, 0.0175, 1)
+        sell_fee = expected_fee(net_buy_size, 0.4, 0.0175)
         expected_realized_pnl = (net_buy_size * 0.4 - sell_fee) - 25.0
 
         self.assertTrue(math.isclose(result.size, 0.0, rel_tol=0, abs_tol=1e-9))
