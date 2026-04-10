@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
+from poly_position_watcher.position_service import PositionStore
 from poly_position_watcher.schema.position_model import TradeMessage, UserPosition
 
 
-def build_failed_trade(trade_id: str) -> TradeMessage:
+def build_trade(trade_id: str, status: str = "FAILED", size: float = 10.0) -> TradeMessage:
     return TradeMessage(
         type="TRADE",
         event_type="trade",
@@ -19,8 +21,8 @@ def build_failed_trade(trade_id: str) -> TradeMessage:
         owner="0xuser",
         price=0.25,
         side="BUY",
-        size=10.0,
-        status="FAILED",
+        size=size,
+        status=status,
         taker_order_id=f"0xorder-{trade_id}",
         timestamp=1,
         match_time=1,
@@ -46,13 +48,30 @@ class UserPositionTests(unittest.TestCase):
             market_id="0xmarket",
             outcome="YES",
             has_failed=True,
-            failed_trades=[build_failed_trade("failed-1"), build_failed_trade("failed-2")],
+            failed_trades=[build_trade("failed-1"), build_trade("failed-2")],
         )
 
         self.assertEqual(position.failed_trade_ids, ["failed-1", "failed-2"])
         rendered = str(position)
         self.assertIn("failed_trades: ['failed-1', 'failed-2']", rendered)
         self.assertNotIn("transaction_hash", rendered)
+
+    def test_failed_trade_warning_logs_once_per_token_and_trade_id(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        trades = [
+            build_trade("confirmed-1", status="CONFIRMED", size=5.0),
+            build_trade("failed-1", status="FAILED", size=10.0),
+        ]
+
+        with patch("poly_position_watcher.position_service.logger.warning") as warning:
+            store.build_position(trades=trades, token_id="0xtoken", outcome="YES")
+            store.build_position(trades=trades, token_id="0xtoken", outcome="YES")
+
+        warning.assert_called_once_with(
+            "Found failed trades, total size: {}, ids: {}",
+            10.0,
+            ["failed-1"],
+        )
 
 
 if __name__ == "__main__":

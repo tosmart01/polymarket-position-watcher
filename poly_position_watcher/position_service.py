@@ -56,6 +56,7 @@ class PositionStore:
         self.trades_by_token: Dict[str, Dict[str, TradeMessage]] = defaultdict(dict)
         self.positions: Dict[str, UserPosition] = {}
         self.orders: Dict[str, OrderMessage] = {}
+        self._warned_failed_trade_keys: set[tuple[str, str]] = set()
         self._lock = threading.RLock()
         self.queue_dict: Dict[str, Queue] = {}
 
@@ -201,9 +202,17 @@ class PositionStore:
             i for i in success_trades if _status_is(i, TradeStatus.CONFIRMED)
         ]
         has_failed = bool(len(failed_trades))
-        if has_failed:
-            failed_size = sum(i.size for i in failed_trades)
-            failed_trade_ids = [trade.id for trade in failed_trades]
+        new_failed_trades = [
+            trade
+            for trade in failed_trades
+            if (token_id, trade.id) not in self._warned_failed_trade_keys
+        ]
+        if new_failed_trades:
+            self._warned_failed_trade_keys.update(
+                (token_id, trade.id) for trade in new_failed_trades
+            )
+            failed_size = sum(i.size for i in new_failed_trades)
+            failed_trade_ids = [trade.id for trade in new_failed_trades]
             logger.warning(
                 "Found failed trades, total size: {}, ids: {}",
                 failed_size,

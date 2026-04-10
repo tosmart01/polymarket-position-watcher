@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.3
+- warn about failed trades only once per `token_id + trade.id` pair to avoid repeated websocket log spam
+
 ## 0.3.2
 - update the default Polymarket fee formula to `size * rate * price * (1 - price)`
 - reduce failed trade logging and display output to trade ids only
