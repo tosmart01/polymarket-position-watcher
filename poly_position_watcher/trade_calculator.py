@@ -102,6 +102,7 @@ def calculate_position_from_trades(
             if order.maker_address.upper() != user_address.upper():
                 continue
             is_maker_order = True
+            event_time = trade.event_time
             size, fee_amount = apply_fee(
                 order.size,
                 order.price,
@@ -113,7 +114,7 @@ def calculate_position_from_trades(
 
             if order.side == Side.BUY:
                 buy_events.append(
-                    (size, order.price, trade.match_time, order.size * order.price)
+                    (size, order.price, event_time, order.size * order.price)
                 )
                 total_original_size += order.size
             else:
@@ -121,7 +122,7 @@ def calculate_position_from_trades(
                     (
                         -size,
                         order.price,
-                        trade.match_time,
+                        event_time,
                         size * order.price - fee_amount,
                     )
                 )
@@ -129,6 +130,7 @@ def calculate_position_from_trades(
 
         # taker 部分
         if not is_maker_order and trade.maker_address.upper() == user_address.upper():
+            event_time = trade.event_time
             size, fee_amount = apply_fee(
                 trade.size,
                 trade.price,
@@ -139,7 +141,7 @@ def calculate_position_from_trades(
             total_fee_amount += fee_amount
             if trade.side == Side.BUY:
                 buy_events.append(
-                    (size, trade.price, trade.match_time, trade.size * trade.price)
+                    (size, trade.price, event_time, trade.size * trade.price)
                 )
                 total_original_size += trade.size
             else:
@@ -147,7 +149,7 @@ def calculate_position_from_trades(
                     (
                         -size,
                         trade.price,
-                        trade.match_time,
+                        event_time,
                         size * trade.price - fee_amount,
                     )
                 )
@@ -219,7 +221,7 @@ def calculate_position_from_trades(
             sell_events=len(sell_events),
             total_trades=len(all_events),
         ),
-        last_update=max([i.match_time for i in trades]) if trades else None,
+        last_update=max((trade.event_time for trade in trades), default=0),
     )
 
 

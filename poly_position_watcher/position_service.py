@@ -97,7 +97,7 @@ class PositionStore:
             outcome, token_id = result
             trades_map = self.trades_by_token[token_id]
             existing = trades_map.get(trade.id)
-            if existing and trade.last_update < existing.last_update:
+            if existing and trade.event_time < existing.event_time:
                 return
             else:
                 trades_map[trade.id] = trade
@@ -249,7 +249,11 @@ class PositionStore:
             last_update=position_result.last_update,
             market_id=trades[0].market,
             outcome=outcome,
-            created_at=datetime.fromtimestamp(position_result.last_update),
+            created_at=(
+                datetime.fromtimestamp(position_result.last_update)
+                if position_result.last_update > 0
+                else None
+            ),
             has_failed=has_failed,
             market_slug=market_slug,
             failed_trades=failed_trades,

@@ -63,10 +63,20 @@ class TradeMessage(BaseModel):
     created_at: datetime | None = None
     market_slug: Optional[str] = ""
 
+    @property
+    def event_time(self) -> int:
+        return self.match_time or self.last_update or self.timestamp or 0
+
     @model_validator(mode="after")
     def validate_datetime(self):
-        base_ts = self.match_time or self.last_update
-        if base_ts:
+        base_ts = self.event_time
+        if self.match_time is None:
+            self.match_time = base_ts or None
+        if self.last_update is None:
+            self.last_update = base_ts or None
+        if self.timestamp is None:
+            self.timestamp = base_ts or None
+        if base_ts > 0:
             self.created_at = datetime.fromtimestamp(base_ts)
         return self
 

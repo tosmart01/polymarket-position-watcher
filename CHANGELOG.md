@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+- normalize trade event timestamps across `match_time`, `last_update`, and `timestamp`
+- prevent empty trade timestamps from breaking position calculation, HTTP sorting, and trade dedupe
+
 ## 0.3.3
 - warn about failed trades only once per `token_id + trade.id` pair to avoid repeated websocket log spam
 

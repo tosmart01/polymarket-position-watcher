@@ -212,6 +212,45 @@ class TradeCalculatorFeeTests(unittest.TestCase):
             math.isclose(result.fee_amount, buy_fee + sell_fee, rel_tol=0, abs_tol=1e-9)
         )
 
+    def test_last_update_falls_back_to_last_update_when_match_time_is_missing(self) -> None:
+        trade = build_taker_trade(
+            trade_id="buy-missing-match-time",
+            side=Side.BUY.value,
+            size=10.0,
+            price=0.25,
+            match_time=1,
+        )
+        trade.match_time = None
+        trade.last_update = 123
+
+        result = calculate_position_from_trades(
+            [trade],
+            user_address=USER_ADDRESS,
+            enable_fee_calc=False,
+        )
+
+        self.assertEqual(result.last_update, 123)
+
+    def test_last_update_defaults_to_zero_when_all_trade_timestamps_are_missing(self) -> None:
+        trade = build_taker_trade(
+            trade_id="buy-missing-all-times",
+            side=Side.BUY.value,
+            size=10.0,
+            price=0.25,
+            match_time=1,
+        )
+        trade.match_time = None
+        trade.last_update = None
+        trade.timestamp = None
+
+        result = calculate_position_from_trades(
+            [trade],
+            user_address=USER_ADDRESS,
+            enable_fee_calc=False,
+        )
+
+        self.assertEqual(result.last_update, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

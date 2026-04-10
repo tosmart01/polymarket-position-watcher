@@ -117,7 +117,7 @@ class APIWorker:
         Uses taker mode (maker_orders=[]) so trade_calculator will use outer fields directly.
 
         :param user_address: User wallet address
-        :return: List of TradeMessage instances sorted by match_time
+        :return: List of TradeMessage instances sorted by effective event time
         """
         positions = self.fetch_positions(user_address)
         if not positions:
@@ -315,7 +315,7 @@ class HttpFallbackManager:
                         logger.error(f"Failed to http fetch trades market {task._market_id}: {e}")
                         continue
                     
-                    for trade in sorted(trades, key=lambda x: x.match_time or 0):
+                    for trade in sorted(trades, key=lambda x: x.event_time):
                         self.service._ingest_trade(trade)
             except Exception as e:
                 logger.error(f"Error in trade loop: {e}")
@@ -563,9 +563,9 @@ class HttpListenerContext:
                 logger.error(f"Failed to http fetch trades market {task._market_id}: {e}")
                 continue
             if is_init:
-                self.service._init_trades(sorted(trades, key=lambda x: x.match_time))
+                self.service._init_trades(sorted(trades, key=lambda x: x.event_time))
             else:
-                for trade in sorted(trades, key=lambda x: x.match_time):
+                for trade in sorted(trades, key=lambda x: x.event_time):
                     self.service._ingest_trade(trade)
 
     def sync_order_from_http(self):
