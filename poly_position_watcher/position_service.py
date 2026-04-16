@@ -54,18 +54,27 @@ class PositionStore:
             if fee_schedule
         }
         self.trades_by_token: Dict[str, Dict[str, TradeMessage]] = defaultdict(dict)
+        self.trades_by_id: Dict[str, TradeMessage] = {}
+        self.trade_ids_by_order: Dict[str, set[str]] = defaultdict(set)
         self.positions: Dict[str, UserPosition] = {}
         self.orders: Dict[str, OrderMessage] = {}
         self._warned_failed_trade_keys: set[tuple[str, str]] = set()
         self._lock = threading.RLock()
         self.queue_dict: Dict[str, Queue] = {}
 
-    def get_token_id_from_trade(self, trade: TradeMessage) -> tuple[str, str] | None:
-        if trade.maker_address.upper() == self.user_address.upper():
-            return trade.outcome, trade.asset_id
+    def _is_user_outer_trade(self, trade: TradeMessage) -> bool:
+        return trade.maker_address.upper() == self.user_address.upper()
+
+    def _iter_user_maker_orders(self, trade: TradeMessage):
         for order in trade.maker_orders:
             if order.maker_address.upper() == self.user_address.upper():
-                return order.outcome, order.asset_id
+                yield order
+
+    def get_token_id_from_trade(self, trade: TradeMessage) -> tuple[str, str] | None:
+        if self._is_user_outer_trade(trade):
+            return trade.outcome, trade.asset_id
+        for order in self._iter_user_maker_orders(trade):
+            return order.outcome, order.asset_id
 
     def _put(self, _id: str, item: UserPosition | OrderMessage) -> None:
         if _id not in self.queue_dict:
@@ -99,8 +108,10 @@ class PositionStore:
             existing = trades_map.get(trade.id)
             if existing and trade.event_time < existing.event_time:
                 return
-            else:
-                trades_map[trade.id] = trade
+            if existing:
+                self._remove_trade_indexes(existing)
+            trades_map[trade.id] = trade
+            self._index_trade(trade)
             user_pos = self.build_position(
                 trades=list(trades_map.values()), token_id=token_id, outcome=outcome
             )
@@ -120,7 +131,10 @@ class PositionStore:
             outcome, token_id = result
             trades_map = self.trades_by_token[token_id]
             for trade in trades:
+                if existing := trades_map.get(trade.id):
+                    self._remove_trade_indexes(existing)
                 trades_map[trade.id] = trade
+                self._index_trade(trade)
             user_pos = self.build_position(
                 trades=list(trades_map.values()), token_id=token_id, outcome=outcome
             )
@@ -141,7 +155,10 @@ class PositionStore:
                 and order.status == existing.status
             ):
                 return
-            if abs(order.size_matched - order.original_size) < 0.5:
+            if (
+                order.original_size is not None
+                and abs(order.size_matched - order.original_size) < 0.5
+            ):
                 order.filled = True
             self.orders[order.id] = order
             self._put(order.id, order)
@@ -190,9 +207,43 @@ class PositionStore:
             self.positions[token_id] = user_pos
             self._put(token_id, user_pos)
 
-    def build_position(
-        self, trades: list[TradeMessage], token_id, outcome: str
+    def _iter_user_order_ids_for_trade(self, trade: TradeMessage):
+        if self._is_user_outer_trade(trade) and trade.taker_order_id:
+            yield trade.taker_order_id
+        for order in self._iter_user_maker_orders(trade):
+            yield order.order_id
+
+    def _index_trade(self, trade: TradeMessage) -> None:
+        self.trades_by_id[trade.id] = trade
+        for order_id in self._iter_user_order_ids_for_trade(trade):
+            if order_id:
+                self.trade_ids_by_order[order_id].add(trade.id)
+
+    def _remove_trade_indexes(self, trade: TradeMessage) -> None:
+        existing = self.trades_by_id.get(trade.id)
+        if existing is trade or existing is not None:
+            self.trades_by_id.pop(trade.id, None)
+        for order_id in self._iter_user_order_ids_for_trade(trade):
+            if not order_id:
+                continue
+            trade_ids = self.trade_ids_by_order.get(order_id)
+            if not trade_ids:
+                continue
+            trade_ids.discard(trade.id)
+            if not trade_ids:
+                self.trade_ids_by_order.pop(order_id, None)
+
+    def _build_user_position(
+        self,
+        trades: list[TradeMessage],
+        token_id: str,
+        outcome: str,
+        *,
+        warn_failed: bool,
     ) -> UserPosition | None:
+        if not trades:
+            return None
+
         def _status_is(trade: TradeMessage, status: TradeStatus) -> bool:
             return trade.status == status or trade.status == status.value
 
@@ -202,22 +253,23 @@ class PositionStore:
             i for i in success_trades if _status_is(i, TradeStatus.CONFIRMED)
         ]
         has_failed = bool(len(failed_trades))
-        new_failed_trades = [
-            trade
-            for trade in failed_trades
-            if (token_id, trade.id) not in self._warned_failed_trade_keys
-        ]
-        if new_failed_trades:
-            self._warned_failed_trade_keys.update(
-                (token_id, trade.id) for trade in new_failed_trades
-            )
-            failed_size = sum(i.size for i in new_failed_trades)
-            failed_trade_ids = [trade.id for trade in new_failed_trades]
-            logger.warning(
-                "Found failed trades, total size: {}, ids: {}",
-                failed_size,
-                failed_trade_ids,
-            )
+        if warn_failed:
+            new_failed_trades = [
+                trade
+                for trade in failed_trades
+                if (token_id, trade.id) not in self._warned_failed_trade_keys
+            ]
+            if new_failed_trades:
+                self._warned_failed_trade_keys.update(
+                    (token_id, trade.id) for trade in new_failed_trades
+                )
+                failed_size = sum(i.size for i in new_failed_trades)
+                failed_trade_ids = [trade.id for trade in new_failed_trades]
+                logger.warning(
+                    "Found failed trades, total size: {}, ids: {}",
+                    failed_size,
+                    failed_trade_ids,
+                )
         market_slug = next(
             (trade.market_slug for trade in trades if trade.market_slug), ""
         )
@@ -238,7 +290,7 @@ class PositionStore:
                 fee_calc_fn=self.fee_calc_fn,
             )
             sellable_size = confirmed_result.size
-        current = UserPosition(
+        return UserPosition(
             price=position_result.avg_price,
             size=position_result.size,
             original_size=position_result.original_size,
@@ -258,7 +310,16 @@ class PositionStore:
             market_slug=market_slug,
             failed_trades=failed_trades,
         )
-        return current
+
+    def build_position(
+        self, trades: list[TradeMessage], token_id, outcome: str
+    ) -> UserPosition | None:
+        return self._build_user_position(
+            trades=trades,
+            token_id=token_id,
+            outcome=outcome,
+            warn_failed=True,
+        )
         # if exists_pos := self.positions.get(token_id):
         #     if exists_pos.last_update < current.last_update:
         #         return current
@@ -277,6 +338,53 @@ class PositionStore:
 
     def get_order_by_id(self, order_id: str) -> OrderMessage:
         return self.orders.get(order_id)
+
+    def get_positions_by_order_ids(
+        self, order_ids: list[str]
+    ) -> Dict[str, UserPosition]:
+        with self._lock:
+            trade_ids: set[str] = set()
+            for order_id in order_ids:
+                if order := self.orders.get(order_id):
+                    trade_ids.update(order.associate_trades or [])
+                trade_ids.update(self.trade_ids_by_order.get(order_id, set()))
+
+            grouped_trades: Dict[str, list[TradeMessage]] = defaultdict(list)
+            outcomes: Dict[str, str] = {}
+            for trade_id in trade_ids:
+                trade = self.trades_by_id.get(trade_id)
+                if trade is None:
+                    continue
+                result = self.get_token_id_from_trade(trade)
+                if result is None:
+                    continue
+                outcome, token_id = result
+                grouped_trades[token_id].append(trade)
+                outcomes[token_id] = outcome
+
+            positions: Dict[str, UserPosition] = {}
+            for token_id, trades in grouped_trades.items():
+                position = self._build_user_position(
+                    trades=trades,
+                    token_id=token_id,
+                    outcome=outcomes[token_id],
+                    warn_failed=False,
+                )
+                if position is not None:
+                    positions[token_id] = position
+            return positions
+
+    def get_position_by_order_ids(
+        self, order_ids: list[str]
+    ) -> UserPosition | None:
+        positions = self.get_positions_by_order_ids(order_ids)
+        if not positions:
+            return None
+        if len(positions) > 1:
+            raise ValueError(
+                "order_ids resolve to multiple token positions; use get_positions_by_order_ids instead."
+            )
+        return next(iter(positions.values()))
 
     def blocking_get_token_position(
         self, token_id: str, timeout: float = None
@@ -661,6 +769,16 @@ class PositionWatcherService:
 
     def get_order(self, order_id: str) -> OrderMessage:
         return self.position_store.get_order_by_id(order_id)
+
+    def get_positions_by_order_ids(
+        self, order_ids: list[str]
+    ) -> Dict[str, UserPosition]:
+        return self.position_store.get_positions_by_order_ids(order_ids)
+
+    def get_position_by_order_ids(
+        self, order_ids: list[str]
+    ) -> UserPosition | None:
+        return self.position_store.get_position_by_order_ids(order_ids)
 
     def blocking_get_position(
         self, token_id: str, timeout: float = None

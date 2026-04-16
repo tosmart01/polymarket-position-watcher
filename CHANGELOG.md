@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.5
+- add `get_position_by_order_ids(...)` and `get_positions_by_order_ids(...)` for strategy-level position queries
+- index only the current user's related order ids from live trades, ignoring unrelated maker orders in API payloads
+- allow order snapshots without `original_size` to be stored safely
+
 ## 0.3.4
 - normalize trade event timestamps across `match_time`, `last_update`, and `timestamp`
 - prevent empty trade timestamps from breaking position calculation, HTTP sorting, and trade dedupe

@@ -61,6 +61,8 @@ def main() -> None:
 
         # 非阻塞获取
         position = service.get_position(token_id)
+        strategy_position = service.get_position_by_order_ids(order_ids)
+        strategy_positions = service.get_positions_by_order_ids(order_ids)
         order = service.get_order(order_ids[0])
 
         # 等待并获取订单和仓位
@@ -71,6 +73,8 @@ def main() -> None:
         )
         print(order)
         print(position)
+        print(strategy_position)
+        print(strategy_positions)
         if position:
             print("size (post-fee):", position.size)
             print("original_size (pre-fee):", position.original_size)

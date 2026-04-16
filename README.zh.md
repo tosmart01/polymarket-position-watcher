@@ -48,8 +48,14 @@ with PositionWatcherService(
 
     # 非阻塞：获取当前仓位和订单（立即返回）
     position: UserPosition = service.get_position("<token_id>")
+    strategy_position: UserPosition | None = service.get_position_by_order_ids(["<order_id>"])
+    strategy_positions: dict[str, UserPosition] = service.get_positions_by_order_ids(
+        ["<order_id_1>", "<order_id_2>"]
+    )
     order: OrderMessage = service.get_order("<order_id>")
     print(position)
+    print(strategy_position)
+    print(strategy_positions)
     print(order)
     if position:
         print("size(扣费后):", position.size)
@@ -73,6 +79,7 @@ with PositionWatcherService(
 重要提示：
 - 当 `enable_fee_calc=True` 时，需要显式通过 `set_market_fee_schedule(...)` 或 `set_market_fee_schedules(...)` 注册 market 的 fee metadata。
 - `get_position()` 不会自动查询 `/markets`。
+- 如果你需要按策略 / order ids 维度拿仓位，可以用 `get_position_by_order_ids(...)` 或 `get_positions_by_order_ids(...)`；实现上会先走 `order.associate_trades`，再回退到 watcher 内部根据实时 trade 建的 order-trade 索引。
 - 如果某个 market 没有注册 `feeSchedule`，该 market 的手续费会先跳过，并打印一次 warning。
 
 `feeSchedule` 从哪里取：

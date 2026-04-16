@@ -54,8 +54,14 @@ with PositionWatcherService(
 
     # Non-blocking: Get current positions and orders (returns immediately)
     position: UserPosition = service.get_position("<token_id>")
+    strategy_position: UserPosition | None = service.get_position_by_order_ids(["<order_id>"])
+    strategy_positions: dict[str, UserPosition] = service.get_positions_by_order_ids(
+        ["<order_id_1>", "<order_id_2>"]
+    )
     order: OrderMessage = service.get_order("<order_id>")
     print(position)
+    print(strategy_position)
+    print(strategy_positions)
     print(order)
     if position:
         print("size(post-fee):", position.size)
@@ -79,6 +85,7 @@ with PositionWatcherService(
 Important:
 - When `enable_fee_calc=True`, you must register market fee metadata with `set_market_fee_schedule(...)` or `set_market_fee_schedules(...)`.
 - `get_position()` does not fetch `/markets` automatically.
+- If you need strategy-level positions, use `get_position_by_order_ids(...)` or `get_positions_by_order_ids(...)`; these resolve `order.associate_trades` first and then fall back to the internal trade index built from live trades.
 - If a market is missing `feeSchedule`, fee calculation is skipped for that market and a warning is logged once.
 
 Where does `feeSchedule` come from:
