@@ -72,6 +72,12 @@ with PositionWatcherService(
     
     # 可选：如果你新开了仓位/订单，需要通过 HTTP 兜底监控它们时，可以使用以下 API
     # service.add_http_listen(market_ids=["<condition_id>"], order_ids=["<order_id>"])
+    # service.set_http_listen(
+    #     market_ids=["<condition_id>"],
+    #     order_ids=["<order_id>"],
+    #     group="strategy-a",
+    # )
+    # service.clear_http(group="strategy-a")
     # service.remove_http_listen(market_ids=["<condition_id>"], order_ids=["<order_id>"])
     # service.clear_http()  # 清空所有监控项，但线程继续运行
 ```
@@ -80,6 +86,7 @@ with PositionWatcherService(
 - 当 `enable_fee_calc=True` 时，需要显式通过 `set_market_fee_schedule(...)` 或 `set_market_fee_schedules(...)` 注册 market 的 fee metadata。
 - `get_position()` 不会自动查询 `/markets`。
 - 如果你需要按策略 / order ids 维度拿仓位，可以用 `get_position_by_order_ids(...)` 或 `get_positions_by_order_ids(...)`；实现上会先走 `order.associate_trades`，再回退到 watcher 内部根据实时 trade 建的 order-trade 索引。
+- 如果多个调用方共用一个 watcher，可以给 `add_http_listen(...)`、`remove_http_listen(...)`、`set_http_listen(...)`、`set_market_http_listen(...)`、`set_order_http_listen(...)`、`clear_http(...)` 传 `group="..."`，按命名空间隔离各自的 HTTP 兜底监听集合。
 - 如果某个 market 没有注册 `feeSchedule`，该 market 的手续费会先跳过，并打印一次 warning。
 
 `feeSchedule` 从哪里取：

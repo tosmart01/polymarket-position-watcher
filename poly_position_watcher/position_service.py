@@ -807,14 +807,20 @@ class PositionWatcherService:
     # -------------------------------------------------------------------------
     # HTTP Fallback Management (delegates to HttpFallbackManager)
     # -------------------------------------------------------------------------
+    DEFAULT_HTTP_LISTEN_GROUP = HttpFallbackManager.DEFAULT_GROUP
+
     def add_http_listen(
-        self, order_ids: list[str] = None, market_ids: list[str] = None
+        self,
+        order_ids: list[str] = None,
+        market_ids: list[str] = None,
+        group: str = DEFAULT_HTTP_LISTEN_GROUP,
     ):
         """
         Add markets/orders to HTTP fallback polling.
 
         :param order_ids: List of order IDs to monitor
         :param market_ids: List of market (condition) IDs to monitor
+        :param group: Optional namespace/group name for this caller
         """
         if not self.enable_http_fallback or not self._http_fallback:
             logger.warning(
@@ -822,47 +828,101 @@ class PositionWatcherService:
             )
             return
 
-        self._http_fallback.add(market_ids=market_ids, order_ids=order_ids)
+        self._http_fallback.add(
+            market_ids=market_ids,
+            order_ids=order_ids,
+            group=group,
+        )
 
     def remove_http_listen(
-        self, order_ids: list[str] = None, market_ids: list[str] = None
+        self,
+        order_ids: list[str] = None,
+        market_ids: list[str] = None,
+        group: str = DEFAULT_HTTP_LISTEN_GROUP,
     ):
         """
         Remove markets/orders from HTTP fallback polling.
 
         :param order_ids: List of order IDs to remove
         :param market_ids: List of market (condition) IDs to remove
+        :param group: Optional namespace/group name for this caller
         """
         if not self.enable_http_fallback or not self._http_fallback:
             return
 
-        self._http_fallback.remove(market_ids=market_ids, order_ids=order_ids)
+        self._http_fallback.remove(
+            market_ids=market_ids,
+            order_ids=order_ids,
+            group=group,
+        )
 
-    def set_market_http_listen(self, market_ids: list[str] = None):
+    def set_http_listen(
+        self,
+        order_ids: list[str] = None,
+        market_ids: list[str] = None,
+        group: str = DEFAULT_HTTP_LISTEN_GROUP,
+    ):
+        """
+        Replace HTTP fallback monitoring for one group atomically.
+
+        :param order_ids: List of order IDs to monitor
+        :param market_ids: List of market (condition) IDs to monitor
+        :param group: Optional namespace/group name for this caller
+        """
+        if not self.enable_http_fallback or not self._http_fallback:
+            return
+
+        self._http_fallback.set_group(
+            group=group,
+            market_ids=market_ids,
+            order_ids=order_ids,
+        )
+
+    def set_market_http_listen(
+        self,
+        market_ids: list[str] = None,
+        group: str = DEFAULT_HTTP_LISTEN_GROUP,
+    ):
         """
         Replace HTTP fallback market monitoring list.
 
         :param market_ids: List of market (condition) IDs to monitor
+        :param group: Optional namespace/group name for this caller
         """
         if not self.enable_http_fallback or not self._http_fallback:
             return
 
-        self._http_fallback.set_markets(market_ids=market_ids)
+        self._http_fallback.set_markets(
+            market_ids=market_ids,
+            group=group,
+        )
 
-    def set_order_http_listen(self, order_ids: list[str] = None):
+    def set_order_http_listen(
+        self,
+        order_ids: list[str] = None,
+        group: str = DEFAULT_HTTP_LISTEN_GROUP,
+    ):
         """
         Replace HTTP fallback order monitoring list.
 
         :param order_ids: List of order IDs to monitor
+        :param group: Optional namespace/group name for this caller
         """
         if not self.enable_http_fallback or not self._http_fallback:
             return
 
-        self._http_fallback.set_orders(order_ids=order_ids)
+        self._http_fallback.set_orders(
+            order_ids=order_ids,
+            group=group,
+        )
 
-    def clear_http(self):
-        """Clear all HTTP fallback monitoring (threads keep running)."""
+    def clear_http(self, group: str | None = None):
+        """
+        Clear HTTP fallback monitoring.
+
+        :param group: When provided, clear only that group; otherwise clear all groups.
+        """
         if not self.enable_http_fallback or not self._http_fallback:
             return
 
-        self._http_fallback.clear()
+        self._http_fallback.clear(group=group)

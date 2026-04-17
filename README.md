@@ -78,6 +78,12 @@ with PositionWatcherService(
     
     # Optional: If you open new positions/orders and want to monitor them via HTTP fallback
     # service.add_http_listen(market_ids=["<condition_id>"], order_ids=["<order_id>"])
+    # service.set_http_listen(
+    #     market_ids=["<condition_id>"],
+    #     order_ids=["<order_id>"],
+    #     group="strategy-a",
+    # )
+    # service.clear_http(group="strategy-a")
     # service.remove_http_listen(market_ids=["<condition_id>"], order_ids=["<order_id>"])
     # service.clear_http()  # Clear all monitoring items, threads continue running
 ```
@@ -86,6 +92,7 @@ Important:
 - When `enable_fee_calc=True`, you must register market fee metadata with `set_market_fee_schedule(...)` or `set_market_fee_schedules(...)`.
 - `get_position()` does not fetch `/markets` automatically.
 - If you need strategy-level positions, use `get_position_by_order_ids(...)` or `get_positions_by_order_ids(...)`; these resolve `order.associate_trades` first and then fall back to the internal trade index built from live trades.
+- If multiple callers share one watcher, pass `group="..."` to `add_http_listen(...)`, `remove_http_listen(...)`, `set_http_listen(...)`, `set_market_http_listen(...)`, `set_order_http_listen(...)`, or `clear_http(...)` so each caller manages its own HTTP fallback namespace without overwriting others.
 - If a market is missing `feeSchedule`, fee calculation is skipped for that market and a warning is logged once.
 
 Where does `feeSchedule` come from:

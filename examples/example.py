@@ -87,6 +87,13 @@ def main() -> None:
 
         # 动态添加 HTTP 监控的市场和订单（HTTP 线程已经在运行）
         service.add_http_listen(market_ids=market_ids, order_ids=order_ids)
+        # 推荐：按 group/namespace 维护监听集合，避免多个调用方互相覆盖
+        service.set_http_listen(
+            market_ids=market_ids,
+            order_ids=order_ids,
+            group="example-strategy",
+        )
+        service.clear_http(group="example-strategy")
         # 直接替换监控列表（覆盖已有列表）
         service.set_market_http_listen(market_ids=market_ids)
         service.set_order_http_listen(order_ids=order_ids)

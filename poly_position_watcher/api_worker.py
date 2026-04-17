@@ -196,34 +196,103 @@ class HttpFallbackManager:
     Manages HTTP fallback polling with persistent threads.
     Markets and orders sets can be modified dynamically while threads keep running.
     """
-    
+
+    DEFAULT_GROUP = "__default__"
+
     def __init__(self, service: "PositionWatcherService", http_poll_interval: float = 3):
         self.service = service
         self.http_poll_interval = http_poll_interval
         # Use service's existing APIWorker instance
         self.api_worker = service.api_worker
         self._slug_cache: dict[str, str] = {}
-        
-        # Thread-safe sets for markets and orders
+
+        # Thread-safe grouped monitoring state
         self._lock = threading.RLock()
-        self.markets: set[str] = set()
-        self.orders: set[str] = set()
-        
+        self.market_groups: dict[str, set[str]] = {}
+        self.order_groups: dict[str, set[str]] = {}
+
         # Thread control
         self._stop_event = threading.Event()
         self._trade_thread = None
         self._order_thread = None
         self._running = False
-    
+
+    @staticmethod
+    def _normalize_group(group: str | None) -> str:
+        return group or HttpFallbackManager.DEFAULT_GROUP
+
+    @staticmethod
+    def _clean_ids(values: list[str] | None) -> set[str]:
+        return {value for value in (values or []) if value}
+
+    def _aggregated_markets_locked(self) -> set[str]:
+        markets: set[str] = set()
+        for group_markets in self.market_groups.values():
+            markets.update(group_markets)
+        return markets
+
+    def _aggregated_orders_locked(self) -> set[str]:
+        order_ids: set[str] = set()
+        for group_orders in self.order_groups.values():
+            order_ids.update(group_orders)
+        return order_ids
+
+    def add(
+        self,
+        market_ids: list[str] = None,
+        order_ids: list[str] = None,
+        group: str | None = None,
+    ):
+        """Add markets/orders to monitor for a specific group."""
+        group_name = self._normalize_group(group)
+        with self._lock:
+            if clean_market_ids := self._clean_ids(market_ids):
+                self.market_groups.setdefault(group_name, set()).update(clean_market_ids)
+            if clean_order_ids := self._clean_ids(order_ids):
+                self.order_groups.setdefault(group_name, set()).update(clean_order_ids)
+            logger.info(
+                "Added HTTP monitoring for group {}: {} markets, {} orders",
+                group_name,
+                len(market_ids or []),
+                len(order_ids or []),
+            )
+
+    def set_group(
+        self,
+        *,
+        group: str,
+        market_ids: list[str] | None = None,
+        order_ids: list[str] | None = None,
+    ):
+        """Replace monitored markets/orders for a specific group."""
+        group_name = self._normalize_group(group)
+        clean_market_ids = self._clean_ids(market_ids)
+        clean_order_ids = self._clean_ids(order_ids)
+        with self._lock:
+            if clean_market_ids:
+                self.market_groups[group_name] = clean_market_ids
+            else:
+                self.market_groups.pop(group_name, None)
+            if clean_order_ids:
+                self.order_groups[group_name] = clean_order_ids
+            else:
+                self.order_groups.pop(group_name, None)
+            logger.info(
+                "Set HTTP monitoring group {}: {} markets, {} orders",
+                group_name,
+                len(clean_market_ids),
+                len(clean_order_ids),
+            )
+
     def start(self):
         """Start HTTP polling threads (persistent, runs until stop is called)."""
         with self._lock:
             if self._running:
                 return
-            
+
             self._stop_event.clear()
             self._running = True
-            
+
             self._trade_thread = threading.Thread(
                 target=self._trade_loop,
                 daemon=True,
@@ -232,120 +301,157 @@ class HttpFallbackManager:
                 target=self._order_loop,
                 daemon=True,
             )
-            
+
             self._trade_thread.start()
             self._order_thread.start()
             logger.info("Started HTTP fallback polling threads")
-    
+
     def stop(self):
         """Stop HTTP polling threads."""
         with self._lock:
             if not self._running:
                 return
-            
+
             self._stop_event.set()
             self._running = False
-            
+
             # Wait for threads to finish
             if self._trade_thread:
                 self._trade_thread.join(timeout=2)
             if self._order_thread:
                 self._order_thread.join(timeout=2)
-            
+
             logger.info("Stopped HTTP fallback polling threads")
-    
-    def add(self, market_ids: list[str] = None, order_ids: list[str] = None):
-        """Add markets/orders to monitor."""
-        with self._lock:
-            if market_ids:
-                self.markets.update(market_ids)
-            if order_ids:
-                self.orders.update(order_ids)
-            logger.info(f"Added HTTP monitoring: {len(market_ids or [])} markets, {len(order_ids or [])} orders")
 
-    def set_markets(self, market_ids: list[str] | None = None):
-        """Replace monitored markets with the provided list."""
+    def set_markets(self, market_ids: list[str] | None = None, group: str | None = None):
+        """Replace monitored markets for a specific group."""
+        group_name = self._normalize_group(group)
         with self._lock:
-            self.markets = set(market_ids or [])
-            logger.info(f"Set HTTP monitoring markets: {len(self.markets)} total")
+            clean_market_ids = self._clean_ids(market_ids)
+            if clean_market_ids:
+                self.market_groups[group_name] = clean_market_ids
+            else:
+                self.market_groups.pop(group_name, None)
+            logger.info(
+                "Set HTTP monitoring markets for group {}: {} total",
+                group_name,
+                len(clean_market_ids),
+            )
 
-    def set_orders(self, order_ids: list[str] | None = None):
-        """Replace monitored orders with the provided list."""
+    def set_orders(self, order_ids: list[str] | None = None, group: str | None = None):
+        """Replace monitored orders for a specific group."""
+        group_name = self._normalize_group(group)
         with self._lock:
-            self.orders = set(order_ids or [])
-            logger.info(f"Set HTTP monitoring orders: {len(self.orders)} total")
-    
-    def remove(self, market_ids: list[str] = None, order_ids: list[str] = None):
-        """Remove markets/orders from monitoring."""
+            clean_order_ids = self._clean_ids(order_ids)
+            if clean_order_ids:
+                self.order_groups[group_name] = clean_order_ids
+            else:
+                self.order_groups.pop(group_name, None)
+            logger.info(
+                "Set HTTP monitoring orders for group {}: {} total",
+                group_name,
+                len(clean_order_ids),
+            )
+
+    def remove(
+        self,
+        market_ids: list[str] = None,
+        order_ids: list[str] = None,
+        group: str | None = None,
+    ):
+        """Remove markets/orders from monitoring for a specific group."""
+        group_name = self._normalize_group(group)
         with self._lock:
-            if market_ids:
-                self.markets -= set(market_ids)
-            if order_ids:
-                self.orders -= set(order_ids)
-            logger.info(f"Removed HTTP monitoring: {len(market_ids or [])} markets, {len(order_ids or [])} orders")
-    
-    def clear(self):
-        """Clear all markets and orders (threads keep running)."""
+            if clean_market_ids := self._clean_ids(market_ids):
+                group_markets = self.market_groups.get(group_name)
+                if group_markets is not None:
+                    group_markets -= clean_market_ids
+                    if not group_markets:
+                        self.market_groups.pop(group_name, None)
+            if clean_order_ids := self._clean_ids(order_ids):
+                group_orders = self.order_groups.get(group_name)
+                if group_orders is not None:
+                    group_orders -= clean_order_ids
+                    if not group_orders:
+                        self.order_groups.pop(group_name, None)
+            logger.info(
+                "Removed HTTP monitoring for group {}: {} markets, {} orders",
+                group_name,
+                len(market_ids or []),
+                len(order_ids or []),
+            )
+
+    def clear(self, group: str | None = None):
+        """Clear monitoring state for one group, or all groups when group is omitted."""
         with self._lock:
-            self.markets.clear()
-            self.orders.clear()
-            logger.info("Cleared all HTTP monitoring items (threads continue running)")
-    
+            if group is None:
+                self.market_groups.clear()
+                self.order_groups.clear()
+                logger.info("Cleared all HTTP monitoring groups (threads continue running)")
+                return
+            group_name = self._normalize_group(group)
+            self.market_groups.pop(group_name, None)
+            self.order_groups.pop(group_name, None)
+            logger.info(
+                "Cleared HTTP monitoring group {} (threads continue running)",
+                group_name,
+            )
+
     def _trade_loop(self):
         """Trade polling loop - runs continuously until stopped."""
         while not self._stop_event.wait(self.http_poll_interval):
             try:
                 self._update_missing_market_slugs()
                 with self._lock:
-                    markets = list(self.markets)
-                
+                    markets = list(self._aggregated_markets_locked())
+
                 if not markets:
                     continue  # No markets to poll, continue waiting
-                
+
                 tasks = []
                 for market in markets:
                     task = executor.submit(self.api_worker.fetch_trades, market)
                     task._market_id = market
                     tasks.append(task)
-                
+
                 for task in as_completed(tasks):
                     try:
                         trades = task.result()
                     except Exception as e:
                         logger.error(f"Failed to http fetch trades market {task._market_id}: {e}")
                         continue
-                    
+
                     for trade in sorted(trades, key=lambda x: x.event_time):
                         self.service._ingest_trade(trade)
             except Exception as e:
                 logger.error(f"Error in trade loop: {e}")
-        
+
         logger.info("Trade polling loop stopped")
-    
+
     def _order_loop(self):
         """Order polling loop - runs continuously until stopped."""
         while not self._stop_event.wait(self.http_poll_interval):
             try:
                 self._update_missing_market_slugs()
                 with self._lock:
-                    order_ids = list(self.orders)
-                
+                    order_ids = list(self._aggregated_orders_locked())
+
                 if not order_ids:
                     continue  # No orders to poll, continue waiting
-                
+
                 tasks = []
                 for order_id in order_ids:
                     task = executor.submit(self.api_worker.fetch_order, order_id)
                     task._order_id = order_id
                     tasks.append(task)
-                
+
                 for task in as_completed(tasks):
                     try:
                         order = task.result()
                     except Exception as e:
                         logger.error(f"Failed to fetch order {task._order_id}: {e}")
                         continue
-                    
+
                     if order is None:
                         exists = self.service.position_store.orders.get(task._order_id)
                         if exists:
@@ -355,7 +461,7 @@ class HttpFallbackManager:
                         self.service._ingest_order(order)
             except Exception as e:
                 logger.error(f"Error in order loop: {e}")
-        
+
         logger.info("Order polling loop stopped")
 
     def _update_missing_market_slugs(self):

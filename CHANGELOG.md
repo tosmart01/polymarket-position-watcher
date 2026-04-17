@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.6
+- add `group` namespaces to HTTP fallback listen APIs while keeping old calls compatible via the default group
+- add `set_http_listen(...)` for atomic per-group HTTP monitor replacement
+
 ## 0.3.5
 - add `get_position_by_order_ids(...)` and `get_positions_by_order_ids(...)` for strategy-level position queries
 - index only the current user's related order ids from live trades, ignoring unrelated maker orders in API payloads
