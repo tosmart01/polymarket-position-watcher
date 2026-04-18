@@ -16,6 +16,11 @@
 - Position fields for fill checks:
   `size` (post-fee net size), `original_size` (pre-fee net size), `sellable_size` (on-chain confirmed size), `fee_amount` (accumulated fee amount)
 - Failed trades are detected and returned on positions (`has_failed`, `failed_trades`)
+- Strategy-scoped position queries by `order_ids`:
+  `get_position_by_order_ids(...)` and `get_positions_by_order_ids(...)`
+- Order-aware fill helpers:
+  `get_effective_position_size(...)`, `wait_for_orders_filled(...)`, `wait_for_orders_pos_filled(...)`
+- HTTP fallback namespaces via `group=...`, so multiple callers can share one watcher without overwriting each other's monitored order/market sets
 
 **Note: WSS disconnects are auto-detected and reconnected.**
 

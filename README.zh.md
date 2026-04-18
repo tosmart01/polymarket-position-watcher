@@ -10,6 +10,11 @@
 - 用于成交判断的仓位字段：
   `size`（扣手续费后净仓位）、`original_size`（扣手续费前净仓位）、`sellable_size`（链上 CONFIRMED 可卖出仓位）、`fee_amount`（累计手续费金额）
 - 识别失败交易，并在仓位结果中返回失败交易列表
+- 支持按 `order_ids` 查询策略维度仓位：
+  `get_position_by_order_ids(...)`、`get_positions_by_order_ids(...)`
+- 支持面向订单成交与仓位同步的辅助接口：
+  `get_effective_position_size(...)`、`wait_for_orders_filled(...)`、`wait_for_orders_pos_filled(...)`
+- HTTP 兜底监听支持 `group=...` 命名空间，多个调用方可共享同一个 watcher 而不互相覆盖监听集合
 
 **说明：WSS 断线会自动检测并重连。**
 
