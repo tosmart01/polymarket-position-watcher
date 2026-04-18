@@ -63,7 +63,21 @@ def main() -> None:
         position = service.get_position(token_id)
         strategy_position = service.get_position_by_order_ids(order_ids)
         strategy_positions = service.get_positions_by_order_ids(order_ids)
+        effective_size = service.get_effective_position_size(
+            token_id=token_id,
+            order_ids=order_ids,
+        )
         order = service.get_order(order_ids[0])
+        fill_result = service.wait_for_orders_filled(
+            order_ids,
+            any_filled=True,
+            timeout=3,
+        )
+        pos_fill_result = service.wait_for_orders_pos_filled(
+            order_ids,
+            any_filled=True,
+            timeout=3,
+        )
 
         # 等待并获取订单和仓位
         order = service.blocking_get_order(order_ids[0], timeout=5)
@@ -75,6 +89,11 @@ def main() -> None:
         print(position)
         print(strategy_position)
         print(strategy_positions)
+        print("effective_size:", effective_size)
+        print("fill_result:", fill_result)
+        print("is first order filled:", fill_result.is_filled(order_ids[0]))
+        print("first order item:", fill_result.get(order_ids[0]))
+        print("pos_fill_result:", pos_fill_result)
         if position:
             print("size (post-fee):", position.size)
             print("original_size (pre-fee):", position.original_size)

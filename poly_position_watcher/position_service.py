@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from datetime import datetime
 from queue import Queue, Empty
 from collections import defaultdict
@@ -20,6 +21,8 @@ from poly_position_watcher.schema.position_model import (
     UserPosition,
     TradeMessage,
     OrderMessage,
+    WaitOrderFillItem,
+    WaitOrdersFillResult,
 )
 from poly_position_watcher.trade_calculator import calculate_position_from_trades
 
@@ -338,6 +341,238 @@ class PositionStore:
 
     def get_order_by_id(self, order_id: str) -> OrderMessage:
         return self.orders.get(order_id)
+
+    @staticmethod
+    def _merge_order_ids(
+        order_id: str | None = None,
+        order_ids: list[str] | None = None,
+    ) -> list[str]:
+        merged: list[str] = []
+        if order_id:
+            merged.append(order_id)
+        if order_ids:
+            merged.extend([i for i in order_ids if i])
+        return merged
+
+    def get_effective_position_size(
+        self,
+        token_id: str,
+        order_id: str | None = None,
+        order_ids: list[str] | None = None,
+    ) -> float:
+        """
+        Return the larger value between:
+        - aggregated position original_size derived from trades
+        - any matching order.size_matched from the provided order ids
+
+        This is useful when order WS updates arrive before trades are reflected
+        into the position aggregate.
+        """
+        with self._lock:
+            scoped_position = None
+            merged_order_ids = self._merge_order_ids(order_id, order_ids)
+            if merged_order_ids:
+                scoped_positions = self.get_positions_by_order_ids(merged_order_ids)
+                scoped_position = scoped_positions.get(token_id)
+            position = scoped_position or self.positions.get(token_id)
+            position_size = float(position.original_size) if position else 0.0
+            matched_size = 0.0
+            for current_order_id in merged_order_ids:
+                order = self.orders.get(current_order_id)
+                if order is None:
+                    continue
+                if order.asset_id and order.asset_id != token_id:
+                    continue
+                matched_size = max(matched_size, float(order.size_matched or 0.0))
+            return max(position_size, matched_size)
+
+    def _build_wait_order_fill_item(
+        self,
+        order_id: str,
+        *,
+        target_size: float | None = None,
+        size_tolerance: float = 0.0,
+        position_only: bool = False,
+    ) -> WaitOrderFillItem:
+        order = self.orders.get(order_id)
+        positions = self.get_positions_by_order_ids([order_id])
+        if len(positions) > 1:
+            raise ValueError(
+                f"order_id {order_id} resolved to multiple token positions: {list(positions)}"
+            )
+        position = next(iter(positions.values())) if positions else None
+        token_id = getattr(position, "token_id", None) or getattr(order, "asset_id", None)
+        resolved_target_size = target_size
+        if resolved_target_size is None and order and order.original_size is not None:
+            resolved_target_size = float(order.original_size)
+
+        if position_only:
+            filled_size = float(position.original_size) if position else 0.0
+        elif token_id:
+            filled_size = self.get_effective_position_size(
+                token_id=token_id,
+                order_id=order_id,
+            )
+        else:
+            filled_size = float(order.size_matched or 0.0) if order else 0.0
+
+        if resolved_target_size is not None:
+            filled = (float(resolved_target_size) - filled_size) <= size_tolerance
+        elif position_only:
+            filled = bool(position and position.original_size > size_tolerance)
+        else:
+            filled = bool(getattr(order, "filled", False))
+
+        return WaitOrderFillItem(
+            order_id=order_id,
+            token_id=token_id,
+            filled=filled,
+            filled_size=filled_size,
+            target_size=resolved_target_size,
+            order_status=getattr(order, "status", None),
+            order=order,
+            position=position,
+        )
+
+    @staticmethod
+    def _build_wait_orders_fill_result(
+        *,
+        any_done: bool,
+        all_done: bool,
+        timed_out: bool,
+        filled_list: list[WaitOrderFillItem],
+        live_list: list[WaitOrderFillItem],
+        all_items: list[WaitOrderFillItem],
+    ) -> WaitOrdersFillResult:
+        return WaitOrdersFillResult(
+            any_filled=any_done,
+            all_filled=all_done,
+            timed_out=timed_out,
+            filled_size=sum(item.filled_size for item in filled_list),
+            live_order_ids=[item.order_id for item in live_list],
+            filled_order_ids=[item.order_id for item in filled_list],
+            live_token_ids=[item.token_id for item in live_list if item.token_id],
+            filled_token_ids=[item.token_id for item in filled_list if item.token_id],
+            filled_list=filled_list,
+            live_list=live_list,
+            all_list=all_items,
+            filled_map={item.order_id: item for item in filled_list},
+            live_map={item.order_id: item for item in live_list},
+            all_map={item.order_id: item for item in all_items},
+        )
+
+    def _wait_for_orders(
+        self,
+        order_ids: list[str],
+        *,
+        target_sizes: Mapping[str, float] | None = None,
+        any_filled: bool = False,
+        timeout: float | None = None,
+        check_interval: float = 0.2,
+        size_tolerance: float = 0.0,
+        position_only: bool = False,
+    ) -> WaitOrdersFillResult:
+        clean_order_ids = [order_id for order_id in order_ids if order_id]
+        if not clean_order_ids:
+            raise ValueError("order_ids must contain at least one non-empty order id")
+
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        wait_interval = max(check_interval, 0.01)
+
+        while True:
+            with self._lock:
+                all_items = [
+                    self._build_wait_order_fill_item(
+                        order_id,
+                        target_size=(target_sizes or {}).get(order_id),
+                        size_tolerance=size_tolerance,
+                        position_only=position_only,
+                    )
+                    for order_id in clean_order_ids
+                ]
+
+            filled_list = [item for item in all_items if item.filled]
+            live_list = [item for item in all_items if not item.filled]
+            any_done = bool(filled_list)
+            all_done = len(live_list) == 0
+
+            if (any_filled and any_done) or (not any_filled and all_done):
+                return self._build_wait_orders_fill_result(
+                    any_done=any_done,
+                    all_done=all_done,
+                    timed_out=False,
+                    filled_list=filled_list,
+                    live_list=live_list,
+                    all_items=all_items,
+                )
+
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return self._build_wait_orders_fill_result(
+                        any_done=any_done,
+                        all_done=all_done,
+                        timed_out=True,
+                        filled_list=filled_list,
+                        live_list=live_list,
+                        all_items=all_items,
+                    )
+                time.sleep(min(wait_interval, remaining))
+            else:
+                time.sleep(wait_interval)
+
+    def wait_for_orders_filled(
+        self,
+        order_ids: list[str],
+        *,
+        target_sizes: Mapping[str, float] | None = None,
+        any_filled: bool = False,
+        timeout: float | None = None,
+        check_interval: float = 0.2,
+        size_tolerance: float = 0.0,
+    ) -> WaitOrdersFillResult:
+        """
+        Wait until any or all provided orders are fully filled.
+
+        Per-order fill state is determined from:
+        - order.original_size / custom target_sizes
+        - max(position.original_size, order.size_matched)
+        """
+        return self._wait_for_orders(
+            order_ids,
+            target_sizes=target_sizes,
+            any_filled=any_filled,
+            timeout=timeout,
+            check_interval=check_interval,
+            size_tolerance=size_tolerance,
+            position_only=False,
+        )
+
+    def wait_for_orders_pos_filled(
+        self,
+        order_ids: list[str],
+        *,
+        target_sizes: Mapping[str, float] | None = None,
+        any_filled: bool = False,
+        timeout: float | None = None,
+        check_interval: float = 0.2,
+        size_tolerance: float = 0.0,
+    ) -> WaitOrdersFillResult:
+        """
+        Wait until positions derived from order ids are synchronized to the target.
+
+        Per-order fill state is determined only from:
+        - position.original_size resolved via get_positions_by_order_ids([order_id])
+        """
+        return self._wait_for_orders(
+            order_ids,
+            target_sizes=target_sizes,
+            any_filled=any_filled,
+            timeout=timeout,
+            check_interval=check_interval,
+            size_tolerance=size_tolerance,
+            position_only=True,
+        )
 
     def get_positions_by_order_ids(
         self, order_ids: list[str]
@@ -774,6 +1009,56 @@ class PositionWatcherService:
         self, order_ids: list[str]
     ) -> Dict[str, UserPosition]:
         return self.position_store.get_positions_by_order_ids(order_ids)
+
+    def get_effective_position_size(
+        self,
+        token_id: str,
+        order_id: str | None = None,
+        order_ids: list[str] | None = None,
+    ) -> float:
+        return self.position_store.get_effective_position_size(
+            token_id=token_id,
+            order_id=order_id,
+            order_ids=order_ids,
+        )
+
+    def wait_for_orders_filled(
+        self,
+        order_ids: list[str],
+        *,
+        target_sizes: Mapping[str, float] | None = None,
+        any_filled: bool = False,
+        timeout: float | None = None,
+        check_interval: float = 0.2,
+        size_tolerance: float = 0.0,
+    ) -> WaitOrdersFillResult:
+        return self.position_store.wait_for_orders_filled(
+            order_ids=order_ids,
+            target_sizes=target_sizes,
+            any_filled=any_filled,
+            timeout=timeout,
+            check_interval=check_interval,
+            size_tolerance=size_tolerance,
+        )
+
+    def wait_for_orders_pos_filled(
+        self,
+        order_ids: list[str],
+        *,
+        target_sizes: Mapping[str, float] | None = None,
+        any_filled: bool = False,
+        timeout: float | None = None,
+        check_interval: float = 0.2,
+        size_tolerance: float = 0.0,
+    ) -> WaitOrdersFillResult:
+        return self.position_store.wait_for_orders_pos_filled(
+            order_ids=order_ids,
+            target_sizes=target_sizes,
+            any_filled=any_filled,
+            timeout=timeout,
+            check_interval=check_interval,
+            size_tolerance=size_tolerance,
+        )
 
     def get_position_by_order_ids(
         self, order_ids: list[str]

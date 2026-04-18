@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.7
+- add `wait_for_orders_pos_filled(...)` for waiting on position synchronization via `position.original_size`
+- enhance `wait_for_orders_filled(...)` results with aggregate fields and direct `get(order_id)` / `is_filled(order_id)` helpers
+- document the order-scoped wait APIs and `get_effective_position_size(...)` usage in the example and README
+
 ## 0.3.6
 - add `group` namespaces to HTTP fallback listen APIs while keeping old calls compatible via the default group
 - add `set_http_listen(...)` for atomic per-group HTTP monitor replacement

@@ -129,6 +129,148 @@ class UserPositionTests(unittest.TestCase):
         self.assertIsNotNone(position)
         self.assertEqual(position.size, 4.0)
 
+    def test_get_effective_position_size_prefers_order_size_matched_when_it_is_larger(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        trade = build_trade("trade-a", status="CONFIRMED", size=4.0)
+        trade.taker_order_id = "order-a"
+        store.append_trade(trade)
+        order = build_order("order-a", associate_trades=["trade-a"])
+        order.size_matched = 6.0
+        store.append_order(order)
+
+        effective_size = store.get_effective_position_size("0xtoken", order_id="order-a")
+
+        self.assertEqual(effective_size, 6.0)
+
+    def test_get_effective_position_size_prefers_position_when_order_is_smaller(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        trade = build_trade("trade-a", status="CONFIRMED", size=7.0)
+        trade.taker_order_id = "order-a"
+        store.append_trade(trade)
+        order = build_order("order-a", associate_trades=["trade-a"])
+        order.size_matched = 5.0
+        store.append_order(order)
+
+        effective_size = store.get_effective_position_size("0xtoken", order_id="order-a")
+
+        self.assertEqual(effective_size, 7.0)
+
+    def test_wait_for_orders_filled_returns_structured_result_for_any_filled(self) -> None:
+        store = PositionStore(user_address="0xuser")
+
+        trade_a = build_trade("trade-a", status="CONFIRMED", size=6.0)
+        trade_a.taker_order_id = "order-a"
+        store.append_trade(trade_a)
+        order_a = build_order("order-a", associate_trades=["trade-a"])
+        order_a.original_size = 6.0
+        order_a.size_matched = 6.0
+        store.append_order(order_a)
+
+        trade_b = build_trade("trade-b", status="CONFIRMED", size=2.0)
+        trade_b.taker_order_id = "order-b"
+        store.append_trade(trade_b)
+        order_b = build_order("order-b", associate_trades=["trade-b"])
+        order_b.original_size = 5.0
+        order_b.size_matched = 2.0
+        store.append_order(order_b)
+
+        result = store.wait_for_orders_filled(
+            ["order-a", "order-b"],
+            any_filled=True,
+            timeout=0.1,
+        )
+
+        self.assertTrue(result.any_filled)
+        self.assertFalse(result.all_filled)
+        self.assertFalse(result.timed_out)
+        self.assertEqual(result.filled_size, 6.0)
+        self.assertEqual(result.filled_order_ids, ["order-a"])
+        self.assertEqual(result.live_order_ids, ["order-b"])
+        self.assertEqual(result.filled_token_ids, ["0xtoken"])
+        self.assertEqual(result.live_token_ids, ["0xtoken"])
+        self.assertEqual([item.order_id for item in result.filled_list], ["order-a"])
+        self.assertEqual([item.order_id for item in result.live_list], ["order-b"])
+        self.assertTrue(result.is_filled("order-a"))
+        self.assertFalse(result.is_filled("order-b"))
+        self.assertEqual(result.get("order-a").filled_size, 6.0)
+        self.assertEqual(result.get("order-a").token_id, "0xtoken")
+        self.assertEqual(result.get("order-b").filled_size, 2.0)
+        self.assertEqual(result.filled_list[0].token_id, "0xtoken")
+        self.assertEqual(result.filled_list[0].filled_size, 6.0)
+
+    def test_wait_for_orders_filled_returns_live_list_on_timeout(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        trade = build_trade("trade-a", status="CONFIRMED", size=3.0)
+        trade.taker_order_id = "order-a"
+        store.append_trade(trade)
+        order = build_order("order-a", associate_trades=["trade-a"])
+        order.original_size = 5.0
+        order.size_matched = 3.0
+        store.append_order(order)
+
+        result = store.wait_for_orders_filled(
+            ["order-a"],
+            timeout=0.05,
+            check_interval=0.01,
+        )
+
+        self.assertFalse(result.any_filled)
+        self.assertFalse(result.all_filled)
+        self.assertTrue(result.timed_out)
+        self.assertEqual(result.filled_size, 0.0)
+        self.assertEqual(result.filled_order_ids, [])
+        self.assertEqual(result.live_order_ids, ["order-a"])
+        self.assertEqual(result.filled_token_ids, [])
+        self.assertEqual(result.live_token_ids, ["0xtoken"])
+        self.assertEqual(len(result.filled_list), 0)
+        self.assertEqual(len(result.live_list), 1)
+        self.assertFalse(result.is_filled("order-a"))
+        self.assertEqual(result.get("order-a").filled_size, 3.0)
+        self.assertEqual(result.live_list[0].order_id, "order-a")
+        self.assertEqual(result.live_list[0].filled_size, 3.0)
+
+    def test_wait_for_orders_pos_filled_waits_for_position_only_not_order_size(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        trade = build_trade("trade-a", status="CONFIRMED", size=3.0)
+        trade.taker_order_id = "order-a"
+        store.append_trade(trade)
+        order = build_order("order-a", associate_trades=["trade-a"])
+        order.original_size = 5.0
+        order.size_matched = 5.0
+        store.append_order(order)
+
+        result = store.wait_for_orders_pos_filled(
+            ["order-a"],
+            timeout=0.05,
+            check_interval=0.01,
+        )
+
+        self.assertFalse(result.any_filled)
+        self.assertFalse(result.all_filled)
+        self.assertTrue(result.timed_out)
+        self.assertEqual(result.get("order-a").filled_size, 3.0)
+
+    def test_wait_for_orders_pos_filled_returns_when_position_reaches_target(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        trade = build_trade("trade-a", status="CONFIRMED", size=4.0)
+        trade.taker_order_id = "order-a"
+        store.append_trade(trade)
+        order = build_order("order-a", associate_trades=["trade-a"])
+        order.original_size = 4.0
+        order.size_matched = 6.0
+        store.append_order(order)
+
+        result = store.wait_for_orders_pos_filled(
+            ["order-a"],
+            timeout=0.1,
+        )
+
+        self.assertTrue(result.any_filled)
+        self.assertTrue(result.all_filled)
+        self.assertFalse(result.timed_out)
+        self.assertEqual(result.filled_size, 4.0)
+        self.assertEqual(result.get("order-a").filled_size, 4.0)
+
     def test_trade_index_only_uses_current_user_related_order_ids(self) -> None:
         store = PositionStore(user_address="0xuser")
         trade = TradeMessage(

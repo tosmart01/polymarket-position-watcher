@@ -164,6 +164,41 @@ class UserPosition(PrettyPrintBaseModel):
     __repr__ = __str__
 
 
+class WaitOrderFillItem(PrettyPrintBaseModel):
+    order_id: str
+    token_id: str | None = None
+    filled: bool = False
+    filled_size: float = 0.0
+    target_size: float | None = None
+    order_status: str | None = None
+    order: OrderMessage | None = None
+    position: UserPosition | None = None
+
+
+class WaitOrdersFillResult(PrettyPrintBaseModel):
+    any_filled: bool
+    all_filled: bool
+    timed_out: bool
+    filled_size: float = 0.0
+    live_order_ids: list[str] = Field(default_factory=list)
+    filled_order_ids: list[str] = Field(default_factory=list)
+    live_token_ids: list[str] = Field(default_factory=list)
+    filled_token_ids: list[str] = Field(default_factory=list)
+    filled_list: list[WaitOrderFillItem] = Field(default_factory=list)
+    live_list: list[WaitOrderFillItem] = Field(default_factory=list)
+    all_list: list[WaitOrderFillItem] = Field(default_factory=list)
+    filled_map: dict[str, WaitOrderFillItem] = Field(default_factory=dict)
+    live_map: dict[str, WaitOrderFillItem] = Field(default_factory=dict)
+    all_map: dict[str, WaitOrderFillItem] = Field(default_factory=dict)
+
+    def get(self, order_id: str) -> WaitOrderFillItem | None:
+        return self.all_map.get(order_id)
+
+    def is_filled(self, order_id: str) -> bool:
+        item = self.all_map.get(order_id)
+        return bool(item and item.filled)
+
+
 class PositionDetails(BaseModel):
     """仓位详细信息"""
 
