@@ -8,7 +8,13 @@
 
 ## Overview
 
-`poly-position-watcher` focuses on real-time position and order monitoring:
+`poly-position-watcher` is built for real trading on Polymarket, where order fills, trade updates, position sync, and sellable on-chain balance may not arrive at the same time.
+
+In practice, `order filled`, `trade confirmed`, `position updated`, and `sellable on-chain` are different states. Strategy code that reacts to only one of them can easily overestimate inventory, mis-time hedges, or place exits before the position is actually ready.
+
+This library acts as an execution reliability layer for Polymarket strategies. It helps you observe and reconcile these states in one place, so your strategy does not mistake "order filled" for "position synchronized" or "position visible" for "actually sellable".
+
+Core capabilities:
 
 - WSS real-time tracking for `TRADE` and `ORDER` (positions + orders)
 - HTTP polling fallback for reliability
