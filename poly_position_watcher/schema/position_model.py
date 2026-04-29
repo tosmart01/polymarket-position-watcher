@@ -21,12 +21,12 @@ class MakerOrder(BaseModel):
     outcome: str
     owner: str
     price: float
-    fee_rate_bps: float
+    fee_rate_bps: float | str | None = None
     outcome_index: int | None = None
     maker_address: str
     side: Side
 
-    @field_validator("fee_rate_bps", "price", "matched_amount", "size", mode="before")
+    @field_validator( "price", "matched_amount", "size", mode="before")
     @classmethod
     def validate_float(cls, v: str):
         return float(v)
@@ -59,7 +59,8 @@ class TradeMessage(BaseModel):
     last_update: int | None = None
     trade_owner: Optional[str] = None
     trader_side: Optional[Literal["MAKER", "TAKER"]] = None
-    fee_rate_bps: float
+    fee_rate_bps: float | str | None = None
+    outcome_index: int | None = None
     created_at: datetime | None = None
     market_slug: Optional[str] = ""
 
@@ -87,7 +88,7 @@ class TradeMessage(BaseModel):
             return None
         return int(v)
 
-    @field_validator("fee_rate_bps", "price", "size", mode="before")
+    @field_validator( "price", "size", mode="before")
     @classmethod
     def validate_float(cls, v: str):
         return float(v)

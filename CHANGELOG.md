@@ -1,4 +1,6 @@
 # Changelog
+## 0.3.8
+- fix fee_rate_bps typing error
 
 ## 0.3.7
 - add `wait_for_orders_pos_filled(...)` for waiting on position synchronization via `position.original_size`
