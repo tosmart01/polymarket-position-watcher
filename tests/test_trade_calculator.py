@@ -123,7 +123,7 @@ class TradeCalculatorFeeTests(unittest.TestCase):
             math.isclose(result.amount, 1947.37 * 0.57, rel_tol=0, abs_tol=1e-9)
         )
 
-    def test_taker_buy_deducts_fee_in_shares(self) -> None:
+    def test_taker_buy_keeps_share_count_and_charges_usdc(self) -> None:
         trade = build_taker_trade(
             trade_id="buy-1",
             side=Side.BUY.value,
@@ -140,15 +140,12 @@ class TradeCalculatorFeeTests(unittest.TestCase):
         )
 
         fee_amount = expected_fee(100.0, 0.25, 0.0175)
-        expected_size = 100.0 - fee_amount / 0.25
 
         self.assertTrue(math.isclose(result.fee_amount, fee_amount, rel_tol=0, abs_tol=1e-9))
-        self.assertTrue(math.isclose(result.size, expected_size, rel_tol=0, abs_tol=1e-9))
+        self.assertTrue(math.isclose(result.size, 100.0, rel_tol=0, abs_tol=1e-9))
         self.assertTrue(math.isclose(result.original_size, 100.0, rel_tol=0, abs_tol=1e-9))
         self.assertTrue(math.isclose(result.amount, 25.0, rel_tol=0, abs_tol=1e-9))
-        self.assertTrue(
-            math.isclose(result.avg_price, 25.0 / expected_size, rel_tol=0, abs_tol=1e-9)
-        )
+        self.assertTrue(math.isclose(result.avg_price, 0.25, rel_tol=0, abs_tol=1e-9))
 
     def test_taker_sell_keeps_share_count_and_charges_usdc(self) -> None:
         trade = build_taker_trade(
@@ -184,12 +181,11 @@ class TradeCalculatorFeeTests(unittest.TestCase):
             match_time=1,
         )
         buy_fee = expected_fee(100.0, 0.25, 0.0175)
-        net_buy_size = 100.0 - buy_fee / 0.25
 
         sell_trade = build_taker_trade(
             trade_id="sell-1",
             side=Side.SELL.value,
-            size=net_buy_size,
+            size=100.0,
             price=0.4,
             match_time=2,
         )
@@ -201,8 +197,8 @@ class TradeCalculatorFeeTests(unittest.TestCase):
             fee_schedule_by_market={MARKET_ID: FEE_SCHEDULE},
         )
 
-        sell_fee = expected_fee(net_buy_size, 0.4, 0.0175)
-        expected_realized_pnl = (net_buy_size * 0.4 - sell_fee) - 25.0
+        sell_fee = expected_fee(100.0, 0.4, 0.0175)
+        expected_realized_pnl = (100.0 * 0.4 - sell_fee) - 25.0
 
         self.assertTrue(math.isclose(result.size, 0.0, rel_tol=0, abs_tol=1e-9))
         self.assertTrue(

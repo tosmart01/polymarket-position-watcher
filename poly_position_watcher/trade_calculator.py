@@ -32,11 +32,6 @@ def _default_fee_calc(
     if fee_amount <= 0:
         return size, 0.0
 
-    side_value = getattr(side, "value", side)
-    if str(side_value).upper() == "BUY":
-        fee_size = fee_amount / price
-        return max(size - fee_size, 0.0), fee_amount
-
     return size, fee_amount
 
 

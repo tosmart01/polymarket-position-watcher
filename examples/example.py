@@ -95,8 +95,8 @@ def main() -> None:
         print("first order item:", fill_result.get(order_ids[0]))
         print("pos_fill_result:", pos_fill_result)
         if position:
-            print("size (post-fee):", position.size)
-            print("original_size (pre-fee):", position.original_size)
+            print("size (net shares):", position.size)
+            print("original_size (gross shares):", position.original_size)
             print("fee_amount:", position.fee_amount)
             print("sellable_size:", position.sellable_size)
             if position.has_failed:

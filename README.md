@@ -20,7 +20,7 @@ Core capabilities:
 - HTTP polling fallback for reliability
 - Optional fee calculation using market `feeSchedule`
 - Position fields for fill checks:
-  `size` (post-fee net size), `original_size` (pre-fee net size), `sellable_size` (on-chain confirmed size), `fee_amount` (accumulated fee amount)
+  `size` (net position shares), `original_size` (gross position shares), `sellable_size` (on-chain confirmed size), `fee_amount` (accumulated fee amount in USDC)
 - Failed trades are detected and returned on positions (`has_failed`, `failed_trades`)
 - Strategy-scoped position queries by `order_ids`:
   `get_position_by_order_ids(...)` and `get_positions_by_order_ids(...)`
@@ -94,8 +94,8 @@ with PositionWatcherService(
     print(pos_fill_result)
     print(order)
     if position:
-        print("size(post-fee):", position.size)
-        print("size(pre-fee):", position.original_size)
+        print("size(net shares):", position.size)
+        print("original_size(gross shares):", position.original_size)
         print("fee_amount:", position.fee_amount)
     service.show_positions(limit=10)
     service.show_orders(limit=10)
@@ -236,13 +236,13 @@ Some Polymarket markets enable taker fee / maker rebate. This library supports f
 - Optionally override the fee handler with `fee_calc_fn`
 - Disable (default) if you prefer pre-fee positions
 - Returned position fields:
-  `size` = post-fee net size, `original_size` = pre-fee net size, `fee_amount` = accumulated fee amount
+  `size` = net position shares, `original_size` = gross position shares, `fee_amount` = accumulated fee amount in USDC
 
 Default fee formula (when `fee_calc_fn` is not provided):
 `fee = size * rate * price * (1 - price)`.
 
-On taker buys, the fee is deducted in shares, so `size` is reduced by `fee / price`.
-On taker sells, the fee is charged in USDC, so position size is unchanged and only `fee_amount` increases.
+According to the current Polymarket fees documentation, taker fees are charged in USDC.
+Under the default calculator, both taker buys and taker sells keep share quantity unchanged; fee impact is tracked in `fee_amount` instead of reducing `size`.
 
 ---
 

@@ -1,4 +1,8 @@
 # Changelog
+## 0.3.9
+- sync the default fee behavior with the current Polymarket fees docs: taker buy and taker sell both keep shares unchanged and charge fees in USDC
+- update fee-related tests, example output labels, and README fee semantics
+
 ## 0.3.8
 - fix fee_rate_bps typing error
 
