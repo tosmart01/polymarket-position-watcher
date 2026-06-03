@@ -205,6 +205,22 @@ class UserPositionTests(unittest.TestCase):
 
         self.assertEqual(effective_size, 7.0)
 
+    def test_get_effective_position_size_does_not_fall_back_to_global_position_for_unfilled_order(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        existing_trade = build_trade("trade-existing", status="CONFIRMED", size=7.0)
+        existing_trade.taker_order_id = "order-existing"
+        store.append_trade(existing_trade)
+        store.append_order(build_order("order-existing", associate_trades=["trade-existing"]))
+
+        pending_order = build_order("order-pending", associate_trades=None)
+        pending_order.original_size = 5.0
+        pending_order.size_matched = 0.0
+        store.append_order(pending_order)
+
+        effective_size = store.get_effective_position_size("0xtoken", order_id="order-pending")
+
+        self.assertEqual(effective_size, 0.0)
+
     def test_wait_for_orders_filled_returns_structured_result_for_any_filled(self) -> None:
         store = PositionStore(user_address="0xuser")
 

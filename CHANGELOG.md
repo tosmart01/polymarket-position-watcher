@@ -1,4 +1,8 @@
 # Changelog
+## 0.3.11
+- fix `get_effective_position_size(...)` so order-scoped queries no longer fall back to the global token position when the requested order has no associated trades or matched size yet
+- add a regression test covering unfilled orders on a token that already has other filled positions
+
 ## 0.3.10
 - scope order-based position queries to the requested `order_id` set when a single trade event contains multiple maker orders from the same user
 - add `use_sellable_size=True` to `wait_for_orders_pos_filled(...)` so callers can wait for confirmed sellable size instead of `position.original_size`

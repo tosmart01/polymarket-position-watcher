@@ -403,7 +403,9 @@ class PositionStore:
             if merged_order_ids:
                 scoped_positions = self.get_positions_by_order_ids(merged_order_ids)
                 scoped_position = scoped_positions.get(token_id)
-            position = scoped_position or self.positions.get(token_id)
+                position = scoped_position
+            else:
+                position = self.positions.get(token_id)
             position_size = float(position.original_size) if position else 0.0
             matched_size = 0.0
             for current_order_id in merged_order_ids:
