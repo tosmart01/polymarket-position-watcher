@@ -78,6 +78,12 @@ with PositionWatcherService(
         any_filled=True,
         timeout=3,
     )
+    sellable_fill_result = service.wait_for_orders_pos_filled(
+        ["<order_id_1>", "<order_id_2>"],
+        any_filled=True,
+        timeout=3,
+        use_sellable_size=True,
+    )
     print(position)
     print(strategy_position)
     print(strategy_positions)
@@ -116,8 +122,9 @@ with PositionWatcherService(
 - 当 `enable_fee_calc=True` 时，需要显式通过 `set_market_fee_schedule(...)` 或 `set_market_fee_schedules(...)` 注册 market 的 fee metadata。
 - `get_position()` 不会自动查询 `/markets`。
 - 如果你需要按策略 / order ids 维度拿仓位，可以用 `get_position_by_order_ids(...)` 或 `get_positions_by_order_ids(...)`；实现上会先走 `order.associate_trades`，再回退到 watcher 内部根据实时 trade 建的 order-trade 索引。
+- 同一条 trade 事件里可能同时包含用户自己的多笔 maker order；order-scoped 相关 API 在聚合仓位前会先按请求的 `order_id` 集合过滤这些 maker legs，避免把同一次撮合里的其他订单一起算进去。
 - 如果 order WSS 可能先于 trade 聚合返回，可以用 `get_effective_position_size(...)` 安全地比较 `position.original_size` 和 `order.size_matched`。
-- 如果你关心订单成交进度，用 `wait_for_orders_filled(...)`；如果你需要等仓位聚合 (`position.original_size`) 同步完成再继续处理，用 `wait_for_orders_pos_filled(...)`。
+- 如果你关心订单成交进度，用 `wait_for_orders_filled(...)`；如果你需要等仓位聚合 (`position.original_size`) 同步完成再继续处理，用 `wait_for_orders_pos_filled(...)`。如果你要等链上 `CONFIRMED` 后可卖出的仓位全部就绪，可以传 `use_sellable_size=True`。
 - 如果多个调用方共用一个 watcher，可以给 `add_http_listen(...)`、`remove_http_listen(...)`、`set_http_listen(...)`、`set_market_http_listen(...)`、`set_order_http_listen(...)`、`clear_http(...)` 传 `group="..."`，按命名空间隔离各自的 HTTP 兜底监听集合。
 - 如果某个 market 没有注册 `feeSchedule`，该 market 的手续费会先跳过，并打印一次 warning。
 

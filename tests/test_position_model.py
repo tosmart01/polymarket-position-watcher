@@ -58,6 +58,56 @@ def build_order(
     )
 
 
+def build_shared_maker_trade() -> TradeMessage:
+    return TradeMessage(
+        type="TRADE",
+        event_type="trade",
+        asset_id="0xdown-token",
+        id="trade-shared",
+        maker_orders=[
+            {
+                "order_id": "order-a",
+                "owner": "user-owner",
+                "maker_address": "0xuser",
+                "matched_amount": "10.92",
+                "price": "0.45",
+                "fee_rate_bps": "1000",
+                "asset_id": "0xdown-token",
+                "outcome": "Down",
+                "side": "BUY",
+            },
+            {
+                "order_id": "order-b",
+                "owner": "user-owner",
+                "maker_address": "0xuser",
+                "matched_amount": "9.93",
+                "price": "0.47",
+                "fee_rate_bps": "1000",
+                "asset_id": "0xdown-token",
+                "outcome": "Down",
+                "side": "BUY",
+            },
+        ],
+        transaction_hash="0xhash-shared",
+        market="0xmarket",
+        maker_address="0xouter-not-user",
+        outcome="Down",
+        owner="outer-owner",
+        price=0.46,
+        side="SELL",
+        size=20.85,
+        status="CONFIRMED",
+        taker_order_id="outer-taker-order",
+        timestamp=1,
+        match_time=1,
+        last_update=1,
+        trade_owner="outer-owner",
+        trader_side="MAKER",
+        fee_rate_bps=1000,
+        market_slug="test-market",
+    )
+
+
 class UserPositionTests(unittest.TestCase):
     def test_failed_trade_ids_are_exposed_in_string_output(self) -> None:
         position = UserPosition(
@@ -271,6 +321,76 @@ class UserPositionTests(unittest.TestCase):
         self.assertEqual(result.filled_size, 4.0)
         self.assertEqual(result.get("order-a").filled_size, 4.0)
 
+    def test_wait_for_orders_pos_filled_can_wait_for_sellable_size(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        trade = build_trade("trade-a", status="MATCHED", size=3.0)
+        trade.taker_order_id = "order-a"
+        store.append_trade(trade)
+        order = build_order("order-a", associate_trades=["trade-a"])
+        order.original_size = 3.0
+        order.size_matched = 3.0
+        store.append_order(order)
+
+        result = store.wait_for_orders_pos_filled(
+            ["order-a"],
+            timeout=0.05,
+            check_interval=0.01,
+            use_sellable_size=True,
+        )
+
+        self.assertFalse(result.any_filled)
+        self.assertFalse(result.all_filled)
+        self.assertTrue(result.timed_out)
+        self.assertEqual(result.get("order-a").filled_size, 0.0)
+
+    def test_wait_for_orders_filled_scopes_each_order_when_trade_is_shared(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        store.append_trade(build_shared_maker_trade())
+        order_a = build_order("order-a", asset_id="0xdown-token", associate_trades=["trade-shared"])
+        order_a.original_size = 10.92
+        order_a.size_matched = 10.92
+        store.append_order(order_a)
+        order_b = build_order("order-b", asset_id="0xdown-token", associate_trades=["trade-shared"])
+        order_b.original_size = 9.93
+        order_b.size_matched = 9.93
+        store.append_order(order_b)
+
+        result = store.wait_for_orders_filled(
+            ["order-a", "order-b"],
+            timeout=0.1,
+        )
+
+        self.assertTrue(result.any_filled)
+        self.assertTrue(result.all_filled)
+        self.assertFalse(result.timed_out)
+        self.assertEqual(result.filled_size, 20.85)
+        self.assertEqual(result.get("order-a").filled_size, 10.92)
+        self.assertEqual(result.get("order-b").filled_size, 9.93)
+
+    def test_wait_for_orders_pos_filled_scopes_each_order_when_trade_is_shared(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        store.append_trade(build_shared_maker_trade())
+        order_a = build_order("order-a", asset_id="0xdown-token", associate_trades=["trade-shared"])
+        order_a.original_size = 10.92
+        order_a.size_matched = 10.92
+        store.append_order(order_a)
+        order_b = build_order("order-b", asset_id="0xdown-token", associate_trades=["trade-shared"])
+        order_b.original_size = 9.93
+        order_b.size_matched = 9.93
+        store.append_order(order_b)
+
+        result = store.wait_for_orders_pos_filled(
+            ["order-a", "order-b"],
+            timeout=0.1,
+        )
+
+        self.assertTrue(result.any_filled)
+        self.assertTrue(result.all_filled)
+        self.assertFalse(result.timed_out)
+        self.assertEqual(result.filled_size, 20.85)
+        self.assertEqual(result.get("order-a").filled_size, 10.92)
+        self.assertEqual(result.get("order-b").filled_size, 9.93)
+
     def test_trade_index_only_uses_current_user_related_order_ids(self) -> None:
         store = PositionStore(user_address="0xuser")
         trade = TradeMessage(
@@ -337,6 +457,22 @@ class UserPositionTests(unittest.TestCase):
         self.assertIsNone(store.get_position_by_order_ids(["irrelevant-order-1"]))
         self.assertIsNone(store.get_position_by_order_ids(["irrelevant-order-2"]))
         self.assertIsNone(store.get_position_by_order_ids(["outer-taker-order"]))
+
+    def test_get_position_by_order_ids_scopes_multi_maker_trade_to_requested_order(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        store.append_trade(build_shared_maker_trade())
+        store.append_order(build_order("order-a", asset_id="0xdown-token", associate_trades=["trade-shared"]))
+        store.append_order(build_order("order-b", asset_id="0xdown-token", associate_trades=["trade-shared"]))
+
+        position_a = store.get_position_by_order_ids(["order-a"])
+        position_b = store.get_position_by_order_ids(["order-b"])
+        combined_positions = store.get_positions_by_order_ids(["order-a", "order-b"])
+
+        self.assertIsNotNone(position_a)
+        self.assertIsNotNone(position_b)
+        self.assertEqual(position_a.size, 10.92)
+        self.assertEqual(position_b.size, 9.93)
+        self.assertEqual(combined_positions["0xdown-token"].size, 20.85)
 
 
 if __name__ == "__main__":

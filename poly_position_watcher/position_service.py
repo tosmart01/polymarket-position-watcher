@@ -314,6 +314,35 @@ class PositionStore:
             failed_trades=failed_trades,
         )
 
+    def _scope_trade_for_order_ids(
+        self,
+        trade: TradeMessage,
+        requested_order_ids: set[str],
+    ) -> dict[str, tuple[str, TradeMessage]]:
+        scoped: dict[str, tuple[str, TradeMessage]] = {}
+
+        if self._is_user_outer_trade(trade) and trade.taker_order_id in requested_order_ids:
+            scoped[trade.asset_id] = (
+                trade.outcome,
+                trade.model_copy(update={"maker_orders": []}),
+            )
+
+        maker_orders_by_token: dict[str, list] = defaultdict(list)
+        outcomes_by_token: dict[str, str] = {}
+        for order in self._iter_user_maker_orders(trade):
+            if order.order_id not in requested_order_ids:
+                continue
+            maker_orders_by_token[order.asset_id].append(order)
+            outcomes_by_token[order.asset_id] = order.outcome
+
+        for token_id, maker_orders in maker_orders_by_token.items():
+            scoped[token_id] = (
+                outcomes_by_token[token_id],
+                trade.model_copy(update={"maker_orders": maker_orders}),
+            )
+
+        return scoped
+
     def build_position(
         self, trades: list[TradeMessage], token_id, outcome: str
     ) -> UserPosition | None:
@@ -393,6 +422,7 @@ class PositionStore:
         target_size: float | None = None,
         size_tolerance: float = 0.0,
         position_only: bool = False,
+        use_sellable_size: bool = False,
     ) -> WaitOrderFillItem:
         order = self.orders.get(order_id)
         positions = self.get_positions_by_order_ids([order_id])
@@ -407,7 +437,10 @@ class PositionStore:
             resolved_target_size = float(order.original_size)
 
         if position_only:
-            filled_size = float(position.original_size) if position else 0.0
+            if use_sellable_size:
+                filled_size = float(position.sellable_size) if position else 0.0
+            else:
+                filled_size = float(position.original_size) if position else 0.0
         elif token_id:
             filled_size = self.get_effective_position_size(
                 token_id=token_id,
@@ -419,7 +452,12 @@ class PositionStore:
         if resolved_target_size is not None:
             filled = (float(resolved_target_size) - filled_size) <= size_tolerance
         elif position_only:
-            filled = bool(position and position.original_size > size_tolerance)
+            raw_size = (
+                float(position.sellable_size)
+                if position and use_sellable_size
+                else float(position.original_size) if position else 0.0
+            )
+            filled = raw_size > size_tolerance
         else:
             filled = bool(getattr(order, "filled", False))
 
@@ -471,6 +509,7 @@ class PositionStore:
         check_interval: float = 0.2,
         size_tolerance: float = 0.0,
         position_only: bool = False,
+        use_sellable_size: bool = False,
     ) -> WaitOrdersFillResult:
         clean_order_ids = [order_id for order_id in order_ids if order_id]
         if not clean_order_ids:
@@ -487,6 +526,7 @@ class PositionStore:
                         target_size=(target_sizes or {}).get(order_id),
                         size_tolerance=size_tolerance,
                         position_only=position_only,
+                        use_sellable_size=use_sellable_size,
                     )
                     for order_id in clean_order_ids
                 ]
@@ -557,12 +597,14 @@ class PositionStore:
         timeout: float | None = None,
         check_interval: float = 0.2,
         size_tolerance: float = 0.0,
+        use_sellable_size: bool = False,
     ) -> WaitOrdersFillResult:
         """
         Wait until positions derived from order ids are synchronized to the target.
 
         Per-order fill state is determined only from:
         - position.original_size resolved via get_positions_by_order_ids([order_id])
+        - or position.sellable_size when use_sellable_size=True
         """
         return self._wait_for_orders(
             order_ids,
@@ -572,30 +614,31 @@ class PositionStore:
             check_interval=check_interval,
             size_tolerance=size_tolerance,
             position_only=True,
+            use_sellable_size=use_sellable_size,
         )
 
     def get_positions_by_order_ids(
         self, order_ids: list[str]
     ) -> Dict[str, UserPosition]:
         with self._lock:
-            trade_ids: set[str] = set()
+            trade_ids_by_trade: dict[str, set[str]] = defaultdict(set)
             for order_id in order_ids:
                 if order := self.orders.get(order_id):
-                    trade_ids.update(order.associate_trades or [])
-                trade_ids.update(self.trade_ids_by_order.get(order_id, set()))
+                    for trade_id in order.associate_trades or []:
+                        trade_ids_by_trade[trade_id].add(order_id)
+                for trade_id in self.trade_ids_by_order.get(order_id, set()):
+                    trade_ids_by_trade[trade_id].add(order_id)
 
             grouped_trades: Dict[str, list[TradeMessage]] = defaultdict(list)
             outcomes: Dict[str, str] = {}
-            for trade_id in trade_ids:
+            for trade_id, scoped_order_ids in trade_ids_by_trade.items():
                 trade = self.trades_by_id.get(trade_id)
                 if trade is None:
                     continue
-                result = self.get_token_id_from_trade(trade)
-                if result is None:
-                    continue
-                outcome, token_id = result
-                grouped_trades[token_id].append(trade)
-                outcomes[token_id] = outcome
+                scoped_trades = self._scope_trade_for_order_ids(trade, scoped_order_ids)
+                for token_id, (outcome, scoped_trade) in scoped_trades.items():
+                    grouped_trades[token_id].append(scoped_trade)
+                    outcomes[token_id] = outcome
 
             positions: Dict[str, UserPosition] = {}
             for token_id, trades in grouped_trades.items():
@@ -1050,6 +1093,7 @@ class PositionWatcherService:
         timeout: float | None = None,
         check_interval: float = 0.2,
         size_tolerance: float = 0.0,
+        use_sellable_size: bool = False,
     ) -> WaitOrdersFillResult:
         return self.position_store.wait_for_orders_pos_filled(
             order_ids=order_ids,
@@ -1058,6 +1102,7 @@ class PositionWatcherService:
             timeout=timeout,
             check_interval=check_interval,
             size_tolerance=size_tolerance,
+            use_sellable_size=use_sellable_size,
         )
 
     def get_position_by_order_ids(

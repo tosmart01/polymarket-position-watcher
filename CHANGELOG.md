@@ -1,4 +1,9 @@
 # Changelog
+## 0.3.10
+- scope order-based position queries to the requested `order_id` set when a single trade event contains multiple maker orders from the same user
+- add `use_sellable_size=True` to `wait_for_orders_pos_filled(...)` so callers can wait for confirmed sellable size instead of `position.original_size`
+- document the shared-trade order-scoping behavior and the new sellable-size wait mode in the README
+
 ## 0.3.9
 - sync the default fee behavior with the current Polymarket fees docs: taker buy and taker sell both keep shares unchanged and charge fees in USDC
 - update fee-related tests, example output labels, and README fee semantics
