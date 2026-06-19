@@ -59,6 +59,7 @@ class PositionStore:
         self.trades_by_token: Dict[str, Dict[str, TradeMessage]] = defaultdict(dict)
         self.trades_by_id: Dict[str, TradeMessage] = {}
         self.trade_ids_by_order: Dict[str, set[str]] = defaultdict(set)
+        self.order_ids_by_token: Dict[str, set[str]] = defaultdict(set)
         self.positions: Dict[str, UserPosition] = {}
         self.orders: Dict[str, OrderMessage] = {}
         self._warned_failed_trade_keys: set[tuple[str, str]] = set()
@@ -88,11 +89,15 @@ class PositionStore:
         if _id in self.queue_dict:
             self.queue_dict[_id] = Queue()
 
+    def _remove_q(self, _id: str) -> None:
+        self.queue_dict.pop(_id, None)
+
     def _get(self, _id: str, timeout=None) -> OrderMessage | UserPosition | None:
         with self._lock:
             if _id not in self.queue_dict:
                 self.queue_dict[_id] = Queue()
-        return self.queue_dict[_id].get(timeout=timeout)
+            q = self.queue_dict[_id]
+        return q.get(timeout=timeout)
 
     def append_trade(self, trade: TradeMessage):
         """
@@ -150,12 +155,15 @@ class PositionStore:
         Stores a new order snapshot.
         If duplicate trade ids arrive, the payload with the latest update timestamp wins.
         """
+        if order is None or not order.id:
+            return
         with self._lock:
             existing = self.orders.get(order.id)
             if (
                 existing
                 and order.size_matched <= existing.size_matched
                 and order.status == existing.status
+                and order.asset_id == existing.asset_id
             ):
                 return
             if (
@@ -163,7 +171,10 @@ class PositionStore:
                 and abs(order.size_matched - order.original_size) < 0.5
             ):
                 order.filled = True
+            if existing:
+                self._remove_order_indexes(existing)
             self.orders[order.id] = order
+            self._index_order(order)
             self._put(order.id, order)
 
     def set_market_fee_schedule(
@@ -222,6 +233,10 @@ class PositionStore:
             if order_id:
                 self.trade_ids_by_order[order_id].add(trade.id)
 
+    def _index_order(self, order: OrderMessage) -> None:
+        if order.asset_id and order.id:
+            self.order_ids_by_token[order.asset_id].add(order.id)
+
     def _remove_trade_indexes(self, trade: TradeMessage) -> None:
         existing = self.trades_by_id.get(trade.id)
         if existing is trade or existing is not None:
@@ -235,6 +250,54 @@ class PositionStore:
             trade_ids.discard(trade.id)
             if not trade_ids:
                 self.trade_ids_by_order.pop(order_id, None)
+
+    def _remove_order_indexes(self, order: OrderMessage) -> None:
+        if not order.id:
+            return
+        if order.asset_id:
+            order_ids = self.order_ids_by_token.get(order.asset_id)
+            if order_ids:
+                order_ids.discard(order.id)
+                if not order_ids:
+                    self.order_ids_by_token.pop(order.asset_id, None)
+
+    def remove_token_data(self, token_id: str) -> bool:
+        if not token_id:
+            return False
+        try:
+            with self._lock:
+                had_token_data = self.has_token_data(token_id)
+                trades_map = self.trades_by_token.pop(token_id, None) or {}
+                order_ids_to_remove = set(self.order_ids_by_token.pop(token_id, set()))
+
+                for trade in trades_map.values():
+                    self._remove_trade_indexes(trade)
+                    self._warned_failed_trade_keys.discard((token_id, trade.id))
+                    order_ids_to_remove.update(
+                        order_id
+                        for order_id in self._iter_user_order_ids_for_trade(trade)
+                        if order_id
+                    )
+
+                self.positions.pop(token_id, None)
+                self._remove_q(token_id)
+
+                for order_id in order_ids_to_remove:
+                    if existing_order := self.orders.pop(order_id, None):
+                        self._remove_order_indexes(existing_order)
+                    self.trade_ids_by_order.pop(order_id, None)
+                    self._remove_q(order_id)
+
+                logger.info(
+                    "Removed token data: token_id={}, trades={}, orders={}",
+                    token_id,
+                    len(trades_map),
+                    len(order_ids_to_remove),
+                )
+                return had_token_data
+        except Exception:
+            logger.exception("Failed to remove token data: token_id={}", token_id)
+            return False
 
     def _build_user_position(
         self,
@@ -359,17 +422,27 @@ class PositionStore:
         #     return current
 
     def get_token_position(self, token_id: str) -> UserPosition:
-        return self.positions.get(token_id)
+        with self._lock:
+            return self.positions.get(token_id)
 
     def get_token_order(self, token_id: str) -> list[OrderMessage]:
-        orders = []
-        for key, value in self.orders.items():
-            if value.asset_id == token_id:
-                orders.append(value)
-        return orders
+        with self._lock:
+            return [
+                order for order in self.orders.values() if order.asset_id == token_id
+            ]
 
     def get_order_by_id(self, order_id: str) -> OrderMessage:
-        return self.orders.get(order_id)
+        with self._lock:
+            return self.orders.get(order_id)
+
+    def has_token_data(self, token_id: str) -> bool:
+        with self._lock:
+            return (
+                token_id in self.trades_by_token
+                or token_id in self.positions
+                or token_id in self.order_ids_by_token
+                or token_id in self.queue_dict
+            )
 
     @staticmethod
     def _merge_order_ids(
@@ -1049,6 +1122,9 @@ class PositionWatcherService:
 
     def get_order(self, order_id: str) -> OrderMessage:
         return self.position_store.get_order_by_id(order_id)
+
+    def remove_token_data(self, token_id: str) -> bool:
+        return self.position_store.remove_token_data(token_id)
 
     def get_positions_by_order_ids(
         self, order_ids: list[str]

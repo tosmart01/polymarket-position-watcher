@@ -1,23 +1,34 @@
 from __future__ import annotations
 
+import threading
+import time
 import unittest
+from queue import Empty
 from unittest.mock import patch
 
 from poly_position_watcher.position_service import PositionStore
 from poly_position_watcher.schema.position_model import OrderMessage, TradeMessage, UserPosition
 
 
-def build_trade(trade_id: str, status: str = "FAILED", size: float = 10.0) -> TradeMessage:
+def build_trade(
+    trade_id: str,
+    status: str = "FAILED",
+    size: float = 10.0,
+    *,
+    asset_id: str = "0xtoken",
+    outcome: str = "YES",
+    market: str = "0xmarket",
+) -> TradeMessage:
     return TradeMessage(
         type="TRADE",
         event_type="trade",
-        asset_id="0xtoken",
+        asset_id=asset_id,
         id=trade_id,
         maker_orders=[],
         transaction_hash=f"0xhash-{trade_id}",
-        market="0xmarket",
+        market=market,
         maker_address="0xuser",
-        outcome="YES",
+        outcome=outcome,
         owner="0xuser",
         price=0.25,
         side="BUY",
@@ -489,6 +500,115 @@ class UserPositionTests(unittest.TestCase):
         self.assertEqual(position_a.size, 10.92)
         self.assertEqual(position_b.size, 9.93)
         self.assertEqual(combined_positions["0xdown-token"].size, 20.85)
+
+    def test_remove_token_data_clears_all_indexes_without_touching_other_tokens(self) -> None:
+        store = PositionStore(user_address="0xuser")
+
+        trade_a = build_trade("trade-a", status="CONFIRMED", size=3.0, asset_id="0xtoken")
+        trade_a.taker_order_id = "order-a"
+        store.append_trade(trade_a)
+        order_a = build_order("order-a", asset_id="0xtoken", associate_trades=["trade-a"])
+        store.append_order(order_a)
+
+        failed_trade = build_trade("trade-failed", status="FAILED", size=1.5, asset_id="0xtoken")
+        failed_trade.taker_order_id = "order-failed"
+        store.append_trade(failed_trade)
+        store.append_order(build_order("order-failed", asset_id="0xtoken", associate_trades=["trade-failed"]))
+
+        trade_b = build_trade(
+            "trade-b",
+            status="CONFIRMED",
+            size=5.0,
+            asset_id="0xother-token",
+            outcome="NO",
+            market="0xother-market",
+        )
+        trade_b.taker_order_id = "order-b"
+        store.append_trade(trade_b)
+        store.append_order(
+            build_order("order-b", asset_id="0xother-token", associate_trades=["trade-b"])
+        )
+
+        self.assertIn(("0xtoken", "trade-failed"), store._warned_failed_trade_keys)
+        self.assertIn("0xtoken", store.queue_dict)
+        self.assertIn("order-a", store.queue_dict)
+        self.assertIn("order-failed", store.queue_dict)
+
+        removed = store.remove_token_data("0xtoken")
+
+        self.assertTrue(removed)
+        self.assertNotIn("0xtoken", store.trades_by_token)
+        self.assertNotIn("0xtoken", store.positions)
+        self.assertNotIn("0xtoken", store.order_ids_by_token)
+        self.assertNotIn("0xtoken", store.queue_dict)
+        self.assertNotIn("trade-a", store.trades_by_id)
+        self.assertNotIn("trade-failed", store.trades_by_id)
+        self.assertNotIn("order-a", store.orders)
+        self.assertNotIn("order-failed", store.orders)
+        self.assertNotIn("order-a", store.trade_ids_by_order)
+        self.assertNotIn("order-failed", store.trade_ids_by_order)
+        self.assertNotIn("order-a", store.queue_dict)
+        self.assertNotIn("order-failed", store.queue_dict)
+        self.assertNotIn(("0xtoken", "trade-failed"), store._warned_failed_trade_keys)
+
+        self.assertIn("0xother-token", store.trades_by_token)
+        self.assertIn("0xother-token", store.positions)
+        self.assertIn("0xother-token", store.order_ids_by_token)
+        self.assertIn("trade-b", store.trades_by_id)
+        self.assertIn("order-b", store.orders)
+        self.assertIn("order-b", store.trade_ids_by_order)
+
+        self.assertFalse(store.remove_token_data("0xtoken"))
+
+    def test_remove_token_data_also_clears_pending_orders_without_trades(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        pending_order = build_order("order-pending", asset_id="0xpending-token", associate_trades=None)
+        pending_order.original_size = 5.0
+        pending_order.size_matched = 0.0
+        store.append_order(pending_order)
+
+        self.assertIn("0xpending-token", store.order_ids_by_token)
+        self.assertIn("order-pending", store.queue_dict)
+
+        removed = store.remove_token_data("0xpending-token")
+
+        self.assertTrue(removed)
+        self.assertNotIn("0xpending-token", store.order_ids_by_token)
+        self.assertNotIn("order-pending", store.orders)
+        self.assertNotIn("order-pending", store.queue_dict)
+
+    def test_remove_token_data_does_not_raise_when_cleanup_fails(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        trade = build_trade("trade-a", status="CONFIRMED", size=3.0, asset_id="0xtoken")
+        trade.taker_order_id = "order-a"
+        store.append_trade(trade)
+
+        with patch.object(
+            store, "_remove_trade_indexes", side_effect=RuntimeError("cleanup failed")
+        ):
+            removed = store.remove_token_data("0xtoken")
+
+        self.assertFalse(removed)
+
+    def test_blocking_get_returns_empty_when_queue_is_removed_concurrently(self) -> None:
+        store = PositionStore(user_address="0xuser")
+        errors: list[Exception] = []
+
+        def wait_for_position() -> None:
+            try:
+                store.blocking_get_token_position("0xtoken", timeout=0.05)
+            except Exception as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=wait_for_position)
+        thread.start()
+        time.sleep(0.01)
+        store.remove_token_data("0xtoken")
+        thread.join(timeout=1)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], Empty)
 
 
 if __name__ == "__main__":

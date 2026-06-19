@@ -116,6 +116,7 @@ with PositionWatcherService(
     # service.clear_http(group="strategy-a")
     # service.remove_http_listen(market_ids=["<condition_id>"], order_ids=["<order_id>"])
     # service.clear_http()  # 清空所有监控项，但线程继续运行
+    # service.remove_token_data("<token_id>")  # 可选：不再需要该 token 时，清理其所有内存缓存
 ```
 
 重要提示：
@@ -124,6 +125,7 @@ with PositionWatcherService(
 - 如果你需要按策略 / order ids 维度拿仓位，可以用 `get_position_by_order_ids(...)` 或 `get_positions_by_order_ids(...)`；实现上会先走 `order.associate_trades`，再回退到 watcher 内部根据实时 trade 建的 order-trade 索引。
 - 同一条 trade 事件里可能同时包含用户自己的多笔 maker order；order-scoped 相关 API 在聚合仓位前会先按请求的 `order_id` 集合过滤这些 maker legs，避免把同一次撮合里的其他订单一起算进去。
 - 如果 order WSS 可能先于 trade 聚合返回，可以用 `get_effective_position_size(...)` 安全地比较 `position.original_size` 和 `order.size_matched`。
+- 如果某个 token 的 trade/order/position 只需要短期保留，可以调用 `remove_token_data(token_id)` 原子删除该 token 下的内存数据；实现会同时清理 trade 索引、order 索引、position 缓存以及对应的等待队列。
 - 如果你关心订单成交进度，用 `wait_for_orders_filled(...)`；如果你需要等仓位聚合 (`position.original_size`) 同步完成再继续处理，用 `wait_for_orders_pos_filled(...)`。如果你要等链上 `CONFIRMED` 后可卖出的仓位全部就绪，可以传 `use_sellable_size=True`。
 - 如果多个调用方共用一个 watcher，可以给 `add_http_listen(...)`、`remove_http_listen(...)`、`set_http_listen(...)`、`set_market_http_listen(...)`、`set_order_http_listen(...)`、`clear_http(...)` 传 `group="..."`，按命名空间隔离各自的 HTTP 兜底监听集合。
 - 如果某个 market 没有注册 `feeSchedule`，该 market 的手续费会先跳过，并打印一次 warning。

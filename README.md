@@ -122,6 +122,7 @@ with PositionWatcherService(
     # service.clear_http(group="strategy-a")
     # service.remove_http_listen(market_ids=["<condition_id>"], order_ids=["<order_id>"])
     # service.clear_http()  # Clear all monitoring items, threads continue running
+    # service.remove_token_data("<token_id>")  # Optional: purge all cached in-memory data for this token
 ```
 
 Important:
@@ -130,6 +131,7 @@ Important:
 - If you need strategy-level positions, use `get_position_by_order_ids(...)` or `get_positions_by_order_ids(...)`; these resolve `order.associate_trades` first and then fall back to the internal trade index built from live trades.
 - A single trade event can include multiple maker orders from the same user; order-scoped APIs automatically filter those maker legs back down to the requested `order_id` set before aggregating positions.
 - If order WS updates may arrive before trade aggregation, use `get_effective_position_size(...)` to compare `position.original_size` and `order.size_matched` safely.
+- If a token's trade/order/position state only needs to be retained temporarily, call `remove_token_data(token_id)` to atomically purge that token's in-memory data, including trade indexes, order indexes, cached positions, and wait queues.
 - Use `wait_for_orders_filled(...)` when you care about order fill progress; use `wait_for_orders_pos_filled(...)` when you need the position aggregate (`position.original_size`) to be synchronized before continuing. Pass `use_sellable_size=True` when you need to wait until the position becomes fully sellable from confirmed trades.
 - If multiple callers share one watcher, pass `group="..."` to `add_http_listen(...)`, `remove_http_listen(...)`, `set_http_listen(...)`, `set_market_http_listen(...)`, `set_order_http_listen(...)`, or `clear_http(...)` so each caller manages its own HTTP fallback namespace without overwriting others.
 - If a market is missing `feeSchedule`, fee calculation is skipped for that market and a warning is logged once.
