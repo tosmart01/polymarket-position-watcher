@@ -47,10 +47,16 @@ class PositionStore:
             [float, float, Side | str, Mapping[str, Any]], tuple[float, float]
         ]
         | None = None,
+        print_first_sellable_size_equal_original: bool = False,
+        sellable_size_equal_tolerance: float = 0.02,
     ):
         self.user_address = user_address
         self.enable_fee_calc = enable_fee_calc
         self.fee_calc_fn = fee_calc_fn
+        self.print_first_sellable_size_equal_original = (
+            print_first_sellable_size_equal_original
+        )
+        self.sellable_size_equal_tolerance = abs(float(sellable_size_equal_tolerance))
         self.market_fee_schedules: Dict[str, dict[str, Any]] = {
             condition_id: dict(fee_schedule)
             for condition_id, fee_schedule in (market_fee_schedules or {}).items()
@@ -63,8 +69,13 @@ class PositionStore:
         self.positions: Dict[str, UserPosition] = {}
         self.orders: Dict[str, OrderMessage] = {}
         self._warned_failed_trade_keys: set[tuple[str, str]] = set()
+        self._printed_sellable_size_equal_tokens: set[str] = set()
         self._lock = threading.RLock()
         self.queue_dict: Dict[str, Queue] = {}
+
+    @staticmethod
+    def _status_is(trade: TradeMessage, status: TradeStatus) -> bool:
+        return trade.status == status or trade.status == status.value
 
     def _is_user_outer_trade(self, trade: TradeMessage) -> bool:
         return trade.maker_address.upper() == self.user_address.upper()
@@ -73,6 +84,36 @@ class PositionStore:
         for order in trade.maker_orders:
             if order.maker_address.upper() == self.user_address.upper():
                 yield order
+
+    def _maybe_print_first_sellable_size_equal_original(
+        self,
+        *,
+        token_id: str,
+        outcome: str,
+        sellable_size: float,
+        original_size: float,
+        buy_events: int,
+        sell_events: int,
+    ) -> None:
+        if not self.print_first_sellable_size_equal_original:
+            return
+        if token_id in self._printed_sellable_size_equal_tokens:
+            return
+        if sell_events > 0 or buy_events <= 0:
+            return
+        if sellable_size <= 0.0 or original_size <= 0.0:
+            return
+        if abs(sellable_size - original_size) > self.sellable_size_equal_tolerance:
+            return
+
+        self._printed_sellable_size_equal_tokens.add(token_id)
+        logger.info(
+            "First sellable_size == original_size: token_id={}, outcome={}, sellable_size={}, original_size={}",
+            token_id,
+            outcome,
+            sellable_size,
+            original_size,
+        )
 
     def get_token_id_from_trade(self, trade: TradeMessage) -> tuple[str, str] | None:
         if self._is_user_outer_trade(trade):
@@ -280,6 +321,7 @@ class PositionStore:
                     )
 
                 self.positions.pop(token_id, None)
+                self._printed_sellable_size_equal_tokens.discard(token_id)
                 self._remove_q(token_id)
 
                 for order_id in order_ids_to_remove:
@@ -310,13 +352,10 @@ class PositionStore:
         if not trades:
             return None
 
-        def _status_is(trade: TradeMessage, status: TradeStatus) -> bool:
-            return trade.status == status or trade.status == status.value
-
-        failed_trades = [i for i in trades if _status_is(i, FAILED_TRADE)]
-        success_trades = [i for i in trades if not _status_is(i, FAILED_TRADE)]
+        failed_trades = [i for i in trades if self._status_is(i, FAILED_TRADE)]
+        success_trades = [i for i in trades if not self._status_is(i, FAILED_TRADE)]
         confirmed_trades = [
-            i for i in success_trades if _status_is(i, TradeStatus.CONFIRMED)
+            i for i in success_trades if self._status_is(i, TradeStatus.CONFIRMED)
         ]
         has_failed = bool(len(failed_trades))
         if warn_failed:
@@ -356,6 +395,15 @@ class PositionStore:
                 fee_calc_fn=self.fee_calc_fn,
             )
             sellable_size = confirmed_result.size
+            if warn_failed:
+                self._maybe_print_first_sellable_size_equal_original(
+                    token_id=token_id,
+                    outcome=outcome,
+                    sellable_size=sellable_size,
+                    original_size=position_result.original_size,
+                    buy_events=position_result.details.buy_events,
+                    sell_events=position_result.details.sell_events,
+                )
         return UserPosition(
             price=position_result.avg_price,
             size=position_result.size,
@@ -783,6 +831,8 @@ class PositionWatcherService:
             [float, float, Side | str, Mapping[str, Any]], tuple[float, float]
         ]
         | None = None,
+        print_first_sellable_size_equal_original: bool = False,
+        sellable_size_equal_tolerance: float = 0.02,
     ):
         """
         :param client: ClobClient instance
@@ -795,6 +845,9 @@ class PositionWatcherService:
         :param enable_fee_calc: Whether to apply fee adjustments in position calc
         :param market_fee_schedules: Optional mapping of condition_id -> feeSchedule
         :param fee_calc_fn: Optional custom fee function (size, price, side, fee_schedule) -> (new_size, fee_amount)
+        :param print_first_sellable_size_equal_original: Print once when sellable_size
+            first reaches original_size for all-buy positions
+        :param sellable_size_equal_tolerance: Float tolerance for the sellable_size/original_size comparison
 
         wss_proxies example: {
             "http_proxy_host": "127.0.0.1",
@@ -809,6 +862,10 @@ class PositionWatcherService:
             enable_fee_calc=enable_fee_calc,
             market_fee_schedules=market_fee_schedules,
             fee_calc_fn=fee_calc_fn,
+            print_first_sellable_size_equal_original=(
+                print_first_sellable_size_equal_original
+            ),
+            sellable_size_equal_tolerance=sellable_size_equal_tolerance,
         )
         self._wss_proxies = wss_proxies or {}
 

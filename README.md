@@ -280,6 +280,8 @@ The HTTP fallback polling threads run persistently throughout the `with` stateme
 | `enable_fee_calc` | bool | False | Apply fee adjustments using registered market `feeSchedule` data |
 | `market_fee_schedules` | mapping | None | Optional initial `condition_id -> feeSchedule` mapping |
 | `fee_calc_fn` | callable | None | Custom fee function: `(size, price, side, fee_schedule) -> (new_size, fee_amount)` |
+| `print_first_sellable_size_equal_original` | bool | False | Log once when an all-buy position first has `sellable_size == original_size` |
+| `sellable_size_equal_tolerance` | float | 0.02 | Tolerance for the `sellable_size` / `original_size` comparison |
 
 ### Environment Variables
 

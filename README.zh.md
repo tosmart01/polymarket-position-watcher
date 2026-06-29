@@ -270,6 +270,8 @@ HTTP 兜底轮询线程在整个 `with` 语句生命周期内持续运行。可�
 | `enable_fee_calc` | bool | False | 使用已注册的 market `feeSchedule` 进行手续费调整 |
 | `market_fee_schedules` | mapping | None | 可选，初始化传入 `condition_id -> feeSchedule` 映射 |
 | `fee_calc_fn` | callable | None | 自定义手续费函数：`(size, price, side, fee_schedule) -> (new_size, fee_amount)` |
+| `print_first_sellable_size_equal_original` | bool | False | 当纯买入仓位首次出现 `sellable_size == original_size` 时打印一次日志 |
+| `sellable_size_equal_tolerance` | float | 0.02 | `sellable_size` / `original_size` 比较允许的浮点误差 |
 
 ### 环境变量
 

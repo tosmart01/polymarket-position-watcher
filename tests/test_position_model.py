@@ -15,6 +15,7 @@ def build_trade(
     status: str = "FAILED",
     size: float = 10.0,
     *,
+    side: str = "BUY",
     asset_id: str = "0xtoken",
     outcome: str = "YES",
     market: str = "0xmarket",
@@ -31,7 +32,7 @@ def build_trade(
         outcome=outcome,
         owner="0xuser",
         price=0.25,
-        side="BUY",
+        side=side,
         size=size,
         status=status,
         taker_order_id=f"0xorder-{trade_id}",
@@ -157,6 +158,65 @@ class UserPositionTests(unittest.TestCase):
             10.0,
             ["failed-1"],
         )
+
+    def test_first_sellable_size_equal_original_logging_is_disabled_by_default(self) -> None:
+        store = PositionStore(user_address="0xuser")
+
+        with patch("poly_position_watcher.position_service.logger.info") as info:
+            store.append_trade(build_trade("confirmed-1", status="CONFIRMED", size=5.0))
+
+        info.assert_not_called()
+
+    def test_first_sellable_size_equal_original_logs_once_for_all_buy_position(self) -> None:
+        store = PositionStore(
+            user_address="0xuser",
+            print_first_sellable_size_equal_original=True,
+        )
+
+        with patch("poly_position_watcher.position_service.logger.info") as info:
+            store.append_trade(build_trade("matched-1", status="MATCHED", size=5.0))
+            store.append_trade(build_trade("matched-1", status="CONFIRMED", size=5.0))
+            store.append_trade(build_trade("confirmed-2", status="CONFIRMED", size=2.0))
+
+        info.assert_called_once_with(
+            "First sellable_size == original_size: token_id={}, outcome={}, sellable_size={}, original_size={}",
+            "0xtoken",
+            "YES",
+            5.0,
+            5.0,
+        )
+
+    def test_first_sellable_size_equal_original_requires_positive_sizes(self) -> None:
+        store = PositionStore(
+            user_address="0xuser",
+            print_first_sellable_size_equal_original=True,
+        )
+
+        with patch("poly_position_watcher.position_service.logger.info") as info:
+            store.append_trade(build_trade("confirmed-1", status="CONFIRMED", size=0.0))
+
+        info.assert_not_called()
+
+    def test_first_sellable_size_equal_original_does_not_log_when_any_user_trade_is_sell(self) -> None:
+        store = PositionStore(
+            user_address="0xuser",
+            print_first_sellable_size_equal_original=True,
+        )
+
+        with patch("poly_position_watcher.position_service.logger.info") as info:
+            store.init_trades(
+                [
+                    build_trade("buy-1", status="CONFIRMED", size=10.0),
+                    build_trade(
+                        "sell-1",
+                        status="CONFIRMED",
+                        size=2.0,
+                        side="SELL",
+                    ),
+                ]
+            )
+
+        info.assert_not_called()
 
     def test_get_position_by_order_ids_uses_order_trade_links(self) -> None:
         store = PositionStore(user_address="0xuser")
