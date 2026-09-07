@@ -47,6 +47,7 @@ client = ClobClient(
 
 with PositionWatcherService(
     client=client,
+    print_ws_message=False,  # 可选：关闭 WS message 日志（默认 True）
     init_positions=True,  # 通过官方 API 初始化仓位
     enable_http_fallback=True,  # 启用 HTTP 兜底轮询
     add_init_positions_to_http=True,  # 自动将初始化仓位的 condition_id 加入 HTTP 监控

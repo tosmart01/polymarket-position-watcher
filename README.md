@@ -53,6 +53,7 @@ client = ClobClient(
 
 with PositionWatcherService(
     client=client,
+    print_ws_message=False,  # Optional: disable WS message logs (default True)
     init_positions=True,  # Initialize positions via official API
     enable_http_fallback=True,  # Enable HTTP polling fallback
     add_init_positions_to_http=True,  # Auto-add condition_ids from init positions to HTTP monitoring

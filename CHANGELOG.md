@@ -1,4 +1,8 @@
 # Changelog
+## 0.3.14
+- add `PositionWatcherService(..., print_ws_message=False)` to disable per-message WS info logs; enabled by default
+- discard `event_type="auto_redeem"` WS messages before order validation
+
 ## 0.3.11
 - fix `get_effective_position_size(...)` so order-scoped queries no longer fall back to the global token position when the requested order has no associated trades or matched size yet
 - add a regression test covering unfilled orders on a token that already has other filled positions

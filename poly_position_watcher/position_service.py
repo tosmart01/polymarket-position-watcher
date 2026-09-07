@@ -833,6 +833,7 @@ class PositionWatcherService:
         | None = None,
         print_first_sellable_size_equal_original: bool = False,
         sellable_size_equal_tolerance: float = 0.02,
+        print_ws_message: bool = True,
     ):
         """
         :param client: ClobClient instance
@@ -848,6 +849,7 @@ class PositionWatcherService:
         :param print_first_sellable_size_equal_original: Print once when sellable_size
             first reaches original_size for all-buy positions
         :param sellable_size_equal_tolerance: Float tolerance for the sellable_size/original_size comparison
+        :param print_ws_message: Whether to print the per-message WS info log (default True)
 
         wss_proxies example: {
             "http_proxy_host": "127.0.0.1",
@@ -856,6 +858,7 @@ class PositionWatcherService:
         }
         """
         self.client = client
+        self.print_ws_message = print_ws_message
         self.user_address = self._resolve_user_address()
         self.position_store = PositionStore(
             self.user_address,
@@ -966,7 +969,10 @@ class PositionWatcherService:
     # WS handler
     # -------------------------------------------------------------------------
     def _handle_ws_message(self, payload):
-        logger.info(f"WS message: {payload.get('type')}")
+        if payload.get("event_type") == "auto_redeem":
+            return
+        if self.print_ws_message:
+            logger.info(f"WS message: {payload.get('type')}")
         if payload.get("type") == "TRADE":
             self._ingest_trade(TradeMessage(**payload))
         else:

@@ -1,6 +1,6 @@
 [project]
 name = "poly-position-watcher"
-version = "0.3.13"
+version = "0.3.14"
 description = "polymarket proxy wallet redeem"
 readme = "README.md"
 requires-python = ">=3.11"
