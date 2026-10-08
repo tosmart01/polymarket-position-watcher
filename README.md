@@ -259,9 +259,9 @@ Under the default calculator, both taker buys and taker sells keep share quantit
 ## Position Initialization
 
 When `init_positions=True`, the service will:
-- Fetch current positions via the official Polymarket API (`/positions`)
-- Create fake trades from position data to maintain compatibility with existing trade-based calculations
-- Skip positions with `currentValue = 0` (empty positions)
+- Fetch all pages of positions via Data API v2 (`/v2/positions`), with a minimum holding of 1 share, excluding redeemable positions
+- Fetch CLOB trade history for those positions to initialize the existing trade-based calculations
+- Skip positions with `current_value = 0` or `current_size = 0`
 - Optionally add condition IDs to HTTP monitoring if `add_init_positions_to_http=True`
 
 The HTTP fallback polling threads run persistently throughout the `with` statement lifecycle. You can dynamically add/remove markets and orders without restarting threads.

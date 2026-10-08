@@ -249,9 +249,9 @@ Polymarket 在部分市场启用 taker fee / maker rebate。本库支持直接�
 ## 仓位初始化
 
 当 `init_positions=True` 时，服务会：
-- 通过官方 Polymarket API (`/positions`) 获取当前仓位
-- 从仓位数据创建假交易以保持与现有基于交易的计算逻辑兼容
-- 跳过 `currentValue = 0` 的仓位（空仓位）
+- 通过 Data API v2 (`/v2/positions`) 游标分页获取全部仓位，最低持仓量为 1 share，并排除可赎回仓位
+- 获取这些仓位对应的 CLOB 历史成交，初始化现有基于交易的计算逻辑
+- 跳过 `current_value = 0` 或 `current_size = 0` 的仓位
 - 如果 `add_init_positions_to_http=True`，可选择性地将 condition ID 添加到 HTTP 监控中
 
 HTTP 兜底轮询线程在整个 `with` 语句生命周期内持续运行。可以动态添加/移除市场和订单，无需重启线程。

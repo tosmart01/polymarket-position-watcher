@@ -1,4 +1,9 @@
 # Changelog
+## 0.3.15
+- migrate position reads to Data API v2 with cursor pagination and updated request parameters
+- adapt position initialization and condition-id extraction to v2 response fields
+- exclude redeemable positions from the v2 OPEN results and guard against repeated pagination cursors
+
 ## 0.3.14
 - add `PositionWatcherService(..., print_ws_message=False)` to disable per-message WS info logs; enabled by default
 - discard `event_type="auto_redeem"` WS messages before order validation

@@ -88,36 +88,47 @@ class APIWorker:
 
     def fetch_positions(self, user_address: str) -> List[dict]:
         """
-        Fetches current positions for a user from the official Polymarket API.
+        Fetch all non-redeemable open positions from Polymarket Data API v2.
 
         :param user_address: User wallet address (0x-prefixed, 40 hex chars)
         :return: List of position dictionaries from the API
         """
-        url = "https://data-api.polymarket.com/positions"
+        url = "https://data-api.polymarket.com/v2/positions"
         params = {
             "user": user_address,
-            "sizeThreshold": 1,
+            "status": "OPEN",
+            "filter_type": "TOKENS",
+            "filter_amount": 1,
             "limit": 100,
-            "sortBy": "CURRENT",
-            "redeemable": False,
-
-            "sortDirection": "DESC",
+            "sort_by": "CURRENT_VALUE",
+            "sort_direction": "DESC",
         }
         try:
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            return response.json()
+            positions = []
+            seen_cursors = set()
+            while True:
+                response = requests.get(url, params=params, timeout=30)
+                response.raise_for_status()
+                payload = response.json()
+                # OPEN includes resolved, unredeemed holdings in v2.
+                positions.extend(pos for pos in payload["data"] if not pos["redeemable"])
+                cursor = payload["pagination"]["next_cursor"]
+                if cursor is None:
+                    return positions
+                if cursor in seen_cursors:
+                    raise ValueError("Repeated positions pagination cursor")
+                seen_cursors.add(cursor)
+                params = {**params, "cursor": cursor}
         except Exception as e:
             logger.error(f"Failed to fetch positions from API: {e}")
             return []
 
     def fetch_trades_from_positions(self, user_address: str) -> dict[str, list[TradeMessage]]:
         """
-        Creates fake TradeMessage instances from current positions using the official API.
-        Uses taker mode (maker_orders=[]) so trade_calculator will use outer fields directly.
+        Fetch CLOB trade history for the user's current Data API v2 positions.
 
         :param user_address: User wallet address
-        :return: List of TradeMessage instances sorted by effective event time
+        :return: TradeMessage instances grouped by position token id
         """
         positions = self.fetch_positions(user_address)
         if not positions:
@@ -129,10 +140,10 @@ class APIWorker:
         for pos in positions:
             try:
                 # Skip positions with size = 0 (empty position)
-                if pos.get('currentValue') == 0 or pos.get("size", 0) == 0:
+                if pos.get("current_value") == 0 or pos.get("current_size", 0) == 0:
                     continue
-                token_id = pos.get("asset")
-                trades = self.fetch_trades(market=pos.get("conditionId"))
+                token_id = pos.get("token_id")
+                trades = self.fetch_trades(market=pos.get("condition_id"))
                 market_slug = pos.get("slug")
                 if market_slug:
                     for trade in trades:
@@ -140,7 +151,7 @@ class APIWorker:
                             trade.market_slug = market_slug
                 initialize_trades[token_id] = trades
             except Exception as e:
-                logger.error(f"Failed to create fake trade from position {pos.get('asset', 'unknown')}: {e}")
+                logger.error(f"Failed to fetch trades for position {pos.get('token_id', 'unknown')}: {e}")
                 continue
         logger.info(f"initialize position count: {len(initialize_trades)}")
         return initialize_trades
@@ -155,7 +166,7 @@ class APIWorker:
         positions = self.fetch_positions(user_address)
         condition_ids = []
         for pos in positions:
-            if condition_id := pos.get("conditionId"):
+            if condition_id := pos.get("condition_id"):
                 condition_ids.append(condition_id)
         return condition_ids
 
